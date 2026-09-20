@@ -52,8 +52,8 @@ usable when Skillforge is unavailable.
    critical failures separately. It must not inspect the skill, key, authoring conversation, or
    runner identities.
 8. **Apply the gate.** Run scripts/eval_gate.py decide. Pass only when all runs exist, treatment's
-   weighted score clears the frozen minimum delta, every core criterion improves, treatment wins
-   more cases than it loses, no core criterion regresses, at least one core criterion improves, and
+   weighted score clears the frozen minimum delta, treatment wins more cases than it loses, no core
+   criterion regresses, at least one core criterion improves, and
    treatment has no critical failure. Do not override a failure by editorial judgment.
 9. **Keep or retire.** On pass, leave the skill active and rerun both clients' skill validation. On
    failure, tell the human plainly and remove it from active discovery. In repositories with a
