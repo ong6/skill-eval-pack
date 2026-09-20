@@ -1,8 +1,9 @@
 # skill-eval-pack
 
-A portable Claude Code and Codex skill that A/B tests a new skill before it earns permanent prompt
-space. It freezes a no-skill baseline, runs the candidate in a separate context, sends anonymized
-outputs to an independent judge agent, and applies a machine-checked keep-or-retire gate.
+A portable Claude Code and Codex skill that A/B tests a new or revised skill before it earns
+permanent prompt space. It separates development cases from fresh heldouts, runs isolated baseline
+and treatment trials, combines deterministic checks with counterbalanced independent judges, and
+applies a machine-checked keep-or-retire gate.
 
 It complements Skillforge (https://github.com/ong6/skillforge): Skillforge stores rigorous frozen
 evaluation bundles and baseline deltas; this pack makes evaluation a required part of skill creation
@@ -27,6 +28,7 @@ model runs during PostToolUse or Stop would be expensive, context-poor, and hard
     python3 -m unittest discover -s tests -p 'test_*.py' -v
     bash tests/test_install.sh
 
-scripts/eval_gate.py uses only the Python standard library. It refuses incomplete judge output,
-mismatched blind keys, and overwritten artifacts. Private prompts and outputs stay wherever the host
-chooses to store the evaluation files.
+scripts/eval_gate.py uses only the Python standard library. Version 2 gates on heldout cases only,
+requires at least two judges, verifies quoted evidence and winner arithmetic, unions critical
+failures, and can veto a candidate on deterministic or trigger failures. Version 1 bundles remain
+compatible. Private prompts and outputs stay wherever the host stores the evaluation files.

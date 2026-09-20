@@ -2,7 +2,7 @@
 name: skill-eval-pack
 description: >-
   Evaluate a newly created or materially revised agent skill against a no-skill
-  baseline, then keep or retire it based on a blinded independent-agent judgment.
+  baseline, then keep or retire it based on blinded independent-agent judgment.
   Use whenever asked to add, create, revise, install, or prove a skill for Claude
   Code or Codex; not for typo-only edits or ordinary prompts that do not change a skill.
 ---
@@ -14,13 +14,26 @@ that skill. Run this workflow during skill creation, before declaring the skill 
 
 ## Contract
 
-- Freeze the task, model, tools, context, rubric, and keep threshold before seeing treatment output.
+- Freeze the task, model, tools, context, rubric, critical failures, and keep threshold before
+  seeing treatment output.
+- Split cases into development and heldout sets. Development cases guide iteration. Only heldout
+  cases decide keep or retire. After any candidate iteration informed by a heldout result, discard
+  those heldouts and write fresh unseen ones before the next gate.
+- Test trigger routing separately when discovery behavior is in scope. Include both positive and
+  negative trigger probes without forcing unrelated requests into the behavioral A/B case set.
+- Prefer deterministic graders for anything mechanically checkable. Run them before judge scoring
+  and retain their results with the evaluation. Do not replace an exact check with model opinion.
 - Run baseline and treatment in separate fresh contexts. The candidate skill is the only intended
   difference. Do not show its name, text, or purpose to the baseline runner.
-- Use at least one realistic case. Use three or more when the skill is broad, costly, or safety-critical.
-- Preserve failed runs and unknown measurements. Never manufacture an output or score.
-- Give anonymized outputs to a third, fresh judge agent. The author and runners do not judge.
-- Keep only a clear improvement. A tied overall result, cosmetic change, missing run, or critical regression fails.
+- Use multiple baseline and treatment trials whenever execution is stochastic. Use at least two
+  independent judges and three or more for broad, costly, or safety-critical skills.
+- Preserve failed runs and unknown measurements. Record verbatim transcripts and final outcomes;
+  judges must inspect both. Never manufacture an output or score.
+- Give counterbalanced anonymous packets to fresh judge agents. The author and runners do not
+  judge. No judge sees the key or another judge's result.
+- Keep only a clear heldout improvement. A tie, cosmetic change, missing run, core regression, or
+  any heldout treatment critical failure reported by any judge fails. A failed heldout deterministic
+  grader or heldout trigger test also fails.
 
 Use Skillforge (https://github.com/ong6/skillforge) when available to freeze and retain the full
 evaluation bundle. It owns model/case/version provenance and baseline deltas. This pack owns the
@@ -29,66 +42,79 @@ usable when Skillforge is unavailable.
 
 ## Procedure
 
-1. **Define the behavioral claim.** State what the proposed skill should improve and which behavior
-   must not regress. If this cannot be tested in an output, do not create the skill yet.
-2. **Freeze cases and rubric.** Before drafting or loading the candidate, write realistic inputs,
-   expected qualities, weighted criteria, core criterion IDs, critical failures, and a minimum
-   overall delta. Default to 5 points on a normalized 100-point score. Structural validation is a
-   prerequisite, not evidence that the skill helps.
-3. **Run the baseline.** Spawn a fresh general-purpose agent with the exact case, normal repository
-   instructions, and no candidate instructions. Record its output verbatim. Do not let the baseline
-   inspect the candidate file.
-4. **Create the candidate.** Follow the host repository's skill-authoring and validation rules. Keep
-   one canonical skill body. For a Claude/Codex repository, expose that body through each client's
-   normal skill directory without making divergent copies.
-5. **Run the treatment.** Spawn another fresh agent using the same model, case, tools, and context.
-   Explicitly load the candidate skill. Record the output verbatim. If isolation or model parity is
-   unavailable, stop and report that the comparison is not controlled.
-6. **Blind the comparison.** Put verbatim baseline/treatment outputs into the input accepted by
-   scripts/eval_gate.py prepare. Keep its key away from the judge. Candidate ordering changes per
-   case from the declared seed, so a fixed A/B position cannot leak identity.
-7. **Judge independently.** Spawn a third fresh agent with only the blind packet and the rubric. It
-   must return the schema in references/judge-contract.md, quote evidence for every score, and list
-   critical failures separately. It must not inspect the skill, key, authoring conversation, or
-   runner identities.
-8. **Apply the gate.** Run scripts/eval_gate.py decide. Pass only when all runs exist, treatment's
-   weighted score clears the frozen minimum delta, treatment wins more cases than it loses, no core
-   criterion regresses, at least one core criterion improves, and
-   treatment has no critical failure. Do not override a failure by editorial judgment.
+1. **Define the behavioral claim.** State what the proposed skill should improve, what must not
+   regress, and when the skill should and should not trigger. If these cannot be observed, do not
+   create the skill yet.
+2. **Freeze development cases and rubric.** Before drafting or loading the candidate, write
+   realistic inputs, expected qualities, weighted criteria, core criterion IDs, critical failures,
+   deterministic graders where possible, and a minimum overall delta. Default to 5 normalized
+   points. Structural validation is a prerequisite, not evidence that the skill helps.
+3. **Iterate on development cases.** Run no-skill baselines and candidate treatments in fresh,
+   matched contexts. Use multiple trials for stochastic behavior. Review complete transcripts,
+   tool use, artifacts, deterministic grader results, and final outcomes. Fix the skill using only
+   development evidence.
+4. **Freeze fresh heldouts.** Write unseen heldout behavioral cases only after iteration stops. Do
+   not tune against these cases. If routing is in scope, freeze separate positive and negative
+   trigger tests too.
+5. **Run heldout trials.** Use the same model, tools, context, and trial count for baseline and
+   treatment. If isolation or parity is unavailable, stop and report that the comparison is not
+   controlled.
+6. **Blind the comparisons.** Put verbatim transcripts and outcomes into a version 2 input for
+   scripts/eval_gate.py prepare. It emits one packet per judge and counterbalances A/B position
+   for every trial. Keep the key and full packet bundle away from judges; give each judge only its
+   own entry under judge_packets.
+7. **Judge independently.** Each fresh judge uses only its packet and the contract in
+   references/judge-contract.md. It scores every criterion with an exact evidence quote from that
+   run, chooses the winner implied by weighted scores (exact equality is a tie), and selects critical
+   failures only from the frozen taxonomy. Collect all judge results into one v2 judgment file.
+8. **Apply the gate.** Run scripts/eval_gate.py decide. Only heldout cases affect the decision.
+   Treatment must clear the frozen delta, win more heldout cases than it loses, avoid every core
+   regression, improve at least one core criterion, and have an empty union of heldout treatment
+   critical failures across judges. Any heldout treatment deterministic-grader failure or heldout
+   trigger mismatch also retires the candidate. Never override a failure by editorial judgment.
 9. **Keep or retire.** On pass, leave the skill active and rerun both clients' skill validation. On
-   failure, tell the human plainly and remove it from active discovery. In repositories with a
-   no-delete rule, move it to the documented archive and remove stale client links; otherwise use
-   the repository's normal retirement policy. Never silently delete evidence or the candidate.
-10. **Report.** Give the decision, baseline and treatment scores, per-case winners, critical failures,
-    model/isolation limitations, active or archived path, and Claude/Codex validation result.
+   failure, tell the human plainly and follow the repository's retirement policy without deleting
+   evidence. A future attempt needs fresh heldouts.
+10. **Report.** Give the decision, heldout scores and delta, score dispersion, per-case winners,
+    per-judge and pairwise agreement, the strict critical-failure union, trial count,
+    model/isolation limitations, active or retired path, and Claude/Codex validation results.
 
 ## Helper
 
+Version 2 is the default for new evaluations. Version 1 remains accepted for existing bundles.
+
     python3 scripts/eval_gate.py prepare \
       --input evaluation-input.json \
-      --packet judge-packet.json \
+      --packet judge-packets.json \
       --key judge-key.json \
       --seed 20260920
 
-Give judge-packet.json, never judge-key.json, to the judge agent.
+Give each judge only its matching object from judge-packets.json under judge_packets, never the
+bundle or judge-key.json.
 
     python3 scripts/eval_gate.py decide \
-      --packet judge-packet.json \
+      --packet judge-packets.json \
       --key judge-key.json \
-      --judgment judge-output.json \
+      --judgment judge-outputs.json \
       --output decision.json
 
-The helper refuses malformed, incomplete, mismatched, or overwritten artifacts. Inputs and examples
-are documented in references/judge-contract.md. Evaluation artifacts may contain private prompts and
-outputs; keep them out of public repositories unless reviewed.
+The helper refuses malformed, incomplete, mismatched, or overwritten artifacts. Inputs and schemas
+are documented in references/judge-contract.md. Evaluation artifacts may contain private prompts,
+transcripts, and outputs; keep them out of public repositories unless reviewed.
 
 ## Failure patterns
 
 | Bad | Required |
 |---|---|
+| Tune on the cases used for the final decision | Iterate on development cases, then freeze fresh heldouts |
 | Ask one agent to remember how it would answer without the skill | Use separate fresh baseline and treatment contexts |
-| Tell the judge which output used the skill | Blind labels and withhold the key |
-| Score after seeing both outputs with an invented rubric | Freeze criteria, weights, core IDs, and threshold first |
+| Run one trial for stochastic behavior | Run multiple independent baseline and treatment trials |
+| Give every judge treatment in the same position | Use generated counterbalanced judge packets |
+| Judge only the final prose | Review the verbatim transcript, tool behavior, artifacts, and outcome |
+| Ask a model to judge an exact property | Use a deterministic grader with structured passed and details fields; its heldout result gates the decision |
+| Let a judge name a new critical failure | Require every reported failure to match the frozen taxonomy exactly |
+| Accept a winner inconsistent with scores | Derive the winner from weighted scores; equal scores require tie |
+| Accept a generic evidence rationale | Require an evidence_quote copied exactly from that run |
+| Average away one judge's critical failure | Union critical failures; any heldout treatment failure retires |
+| Let strong development results rescue weak heldouts | Gate only on heldout cases |
 | Keep a tie because the skill sounds useful | Retire it; extra prompt cost needs measured benefit |
-| Treat formatting checks as effectiveness | Validate structure, then separately measure behavior |
-| Delete a failed skill in a no-delete repository | Archive it and remove active client links |

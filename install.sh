@@ -25,11 +25,12 @@ if [ -e "$target" ] || [ -L "$target" ]; then
   [ "$force" -eq 1 ] || { printf 'target exists; inspect it or rerun with --force: %s\n' "$target" >&2; exit 2; }
   rm -rf -- "$target"
 fi
-mkdir -p "$target/agents" "$target/references" "$target/scripts" "$repo/.agents/skills"
+mkdir -p "$target/agents" "$target/references" "$target/scripts" "$target/tests" "$repo/.agents/skills"
 cp "$source_dir/SKILL.md" "$target/SKILL.md"
 cp "$source_dir/agents/openai.yaml" "$target/agents/openai.yaml"
 cp "$source_dir/references/judge-contract.md" "$target/references/judge-contract.md"
 cp "$source_dir/scripts/eval_gate.py" "$target/scripts/eval_gate.py"
+cp "$source_dir/tests/test_eval_gate.py" "$target/tests/test_eval_gate.py"
 chmod +x "$target/scripts/eval_gate.py"
 
 if [ -x "$repo/.agents/sync-skills.sh" ]; then
