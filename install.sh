@@ -31,6 +31,7 @@ cp "$source_dir/agents/openai.yaml" "$target/agents/openai.yaml"
 cp "$source_dir/references/judge-contract.md" "$target/references/judge-contract.md"
 cp "$source_dir/scripts/eval_gate.py" "$target/scripts/eval_gate.py"
 cp "$source_dir/tests/test_eval_gate.py" "$target/tests/test_eval_gate.py"
+cp "$source_dir/tests/test_workflow_contract.py" "$target/tests/test_workflow_contract.py"
 chmod +x "$target/scripts/eval_gate.py"
 
 if [ -x "$repo/.agents/sync-skills.sh" ]; then

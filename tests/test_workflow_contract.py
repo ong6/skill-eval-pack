@@ -39,6 +39,12 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("every attempted revision", self.skill)
         self.assertIn('"attempts": [', self.contract)
 
+    def test_forbids_recursive_agent_clis_and_caps_concurrency(self):
+        self.assertIn("Never launch `codex`, `claude`, or another agent CLI", self.skill_flat)
+        self.assertIn("at most four evaluation agents active at once", self.skill_flat)
+        self.assertIn("host's native subagent tool", self.skill_flat)
+        self.assertIn("helper rejects missing, reused, non-native, or recursive-CLI provenance", self.skill_flat)
+
 
 if __name__ == "__main__":
     unittest.main()

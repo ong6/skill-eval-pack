@@ -25,6 +25,15 @@ that skill. Run this workflow during skill creation, before declaring the skill 
   and retain their results with the evaluation. Do not replace an exact check with model opinion.
 - Run baseline and treatment in separate fresh contexts. The candidate skill is the only intended
   difference. Do not show its name, text, or purpose to the baseline runner.
+- Use the current host's native subagent mechanism for runners and judges. Never launch `codex`,
+  `claude`, or another agent CLI from a shell, script, hook, or nested agent: recursive clients can
+  inherit the wrong configuration, multiply processes, exhaust quotas, and invalidate isolation.
+  Keep at most four evaluation agents active at once, including nested children; use one at a time
+  when the host cannot report or enforce the active count.
+- Record structured native provenance for every runner and judge. Version 2 inputs must declare the
+  fixed execution policy from `references/judge-contract.md`; each run and judgment must identify a
+  unique fresh host context and explicitly record that no recursive AI CLI was spawned. The helper
+  rejects missing, reused, non-native, or recursive-CLI provenance before a decision can pass.
 - Use multiple baseline and treatment trials whenever execution is stochastic. Use at least two
   independent judges and three or more for broad, costly, or safety-critical skills.
 - Preserve failed runs and unknown measurements. Record verbatim transcripts and final outcomes;
@@ -60,13 +69,16 @@ usable when Skillforge is unavailable.
 3. **Iterate on development cases.** Run no-skill baselines and candidate treatments in fresh,
    matched contexts. Use multiple trials for stochastic behavior. Review complete transcripts,
    tool use, artifacts, deterministic grader results, and final outcomes. Fix the skill using only
-   development evidence.
+   development evidence. Spawn these runs only through the host's native subagent tool, never by
+   invoking an AI CLI in a shell command or generated harness.
 4. **Freeze fresh heldouts.** Write unseen heldout behavioral cases only after iteration stops. Do
    not tune against these cases. If routing is in scope, freeze separate positive and negative
    trigger tests too.
 5. **Run heldout trials.** Use the same model, tools, context, and trial count for baseline and
    treatment. If isolation or parity is unavailable, stop and report that the comparison is not
-   controlled.
+   controlled. Before preparing packets, inspect the host agent tree and process list, then retain
+   the native agent/context IDs in each run's provenance. Treat any `codex exec`, `claude -p`, or
+   equivalent nested client as contamination and replace every affected run.
 6. **Blind the comparisons.** Put verbatim transcripts and outcomes into a version 2 input for
    scripts/eval_gate.py prepare. It emits one packet per judge and counterbalances A/B position
    for every trial. Keep the key and full packet bundle away from judges; give each judge only its

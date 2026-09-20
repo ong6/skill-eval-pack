@@ -6,6 +6,8 @@ trap 'rm -rf -- "$tmp"' EXIT
 mkdir -p "$tmp/repo"
 bash "$root/install.sh" "$tmp/repo" >/dev/null
 test -f "$tmp/repo/.claude/skills/skill-eval-pack/SKILL.md"
+test -f "$tmp/repo/.claude/skills/skill-eval-pack/tests/test_eval_gate.py"
+test -f "$tmp/repo/.claude/skills/skill-eval-pack/tests/test_workflow_contract.py"
 test -L "$tmp/repo/.agents/skills/skill-eval-pack"
 test "$(readlink "$tmp/repo/.agents/skills/skill-eval-pack")" = '../../.claude/skills/skill-eval-pack'
 if bash "$root/install.sh" "$tmp/repo" >/dev/null 2>&1; then

@@ -111,11 +111,38 @@ def validate_input_v1(data: dict) -> None:
             require_text(case.get(field), f"case {case_id} {field}")
 
 
+def validate_native_provenance(value: object, field: str) -> dict:
+    if not isinstance(value, dict):
+        raise Invalid(f"{field} must be an object")
+    if value.get("mechanism") != "host-native-subagent":
+        raise Invalid(f"{field}.mechanism must be host-native-subagent")
+    require_text(value.get("agent_id"), f"{field}.agent_id")
+    require_text(value.get("context_id"), f"{field}.context_id")
+    if value.get("fresh_context") is not True:
+        raise Invalid(f"{field}.fresh_context must be true")
+    if value.get("recursive_ai_cli_spawned") is not False:
+        raise Invalid(f"{field}.recursive_ai_cli_spawned must be false")
+    require_text(value.get("details"), f"{field}.details")
+    return value
+
+
+def validate_execution_policy(data: dict) -> None:
+    expected = {
+        "runner_mechanism": "host-native-subagent",
+        "judge_mechanism": "host-native-subagent",
+        "max_active_agents": 4,
+        "recursive_ai_cli_allowed": False,
+    }
+    if data.get("execution_policy") != expected:
+        raise Invalid(f"execution_policy must equal {expected}")
+
+
 def validate_run(run: object, field: str) -> None:
     if not isinstance(run, dict):
         raise Invalid(f"{field} must be an object")
     require_text(run.get("transcript"), f"{field}.transcript")
     require_text(run.get("outcome"), f"{field}.outcome")
+    validate_native_provenance(run.get("provenance"), f"{field}.provenance")
     if "grader_result" in run:
         grader_result = run.get("grader_result")
         if not isinstance(grader_result, dict) or not isinstance(grader_result.get("passed"), bool):
@@ -146,6 +173,7 @@ def validate_trigger_tests(data: dict) -> None:
 
 def validate_input_v2(data: dict) -> None:
     validate_common(data)
+    validate_execution_policy(data)
     judge_count = data.get("judge_count")
     if isinstance(judge_count, bool) or not isinstance(judge_count, int) or judge_count < 2:
         raise Invalid("judge_count must be an integer of at least 2")
@@ -155,6 +183,7 @@ def validate_input_v2(data: dict) -> None:
     case_ids = set()
     splits = set()
     comparison_ids = set()
+    context_ids = set()
     for case in cases:
         if not isinstance(case, dict):
             raise Invalid("each case must be an object")
@@ -192,6 +221,11 @@ def validate_input_v2(data: dict) -> None:
             comparison_ids.add(comparison_id)
             validate_run(trial.get("baseline"), f"case {case_id} trial {trial_id} baseline")
             validate_run(trial.get("treatment"), f"case {case_id} trial {trial_id} treatment")
+            for role in ("baseline", "treatment"):
+                context_id = trial[role]["provenance"]["context_id"]
+                if context_id in context_ids:
+                    raise Invalid(f"runner context_id must be unique: {context_id}")
+                context_ids.add(context_id)
             if "deterministic_grader" in case:
                 for role in ("baseline", "treatment"):
                     require_text(
@@ -266,6 +300,12 @@ def prepare_v2(data: dict, seed: str) -> tuple[dict, dict]:
                 treatment_label = "B" if treatment_label == "A" else "A"
             baseline_label = "B" if treatment_label == "A" else "A"
             runs = {baseline_label: trial["baseline"], treatment_label: trial["treatment"]}
+            blinded_runs = {}
+            for label, run in runs.items():
+                blinded_runs[label] = {
+                    field: run[field] for field in ("transcript", "outcome", "grader_result")
+                    if field in run
+                }
             item = {
                 "comparison_id": comparison_id,
                 "case_id": case["id"],
@@ -273,7 +313,7 @@ def prepare_v2(data: dict, seed: str) -> tuple[dict, dict]:
                 "split": case["split"],
                 "input": case["input"],
                 "expected": case["expected"],
-                "answers": [{"label": label, **runs[label]} for label in ("A", "B")],
+                "answers": [{"label": label, **blinded_runs[label]} for label in ("A", "B")],
             }
             if "deterministic_grader" in case:
                 item["deterministic_grader"] = case["deterministic_grader"]
@@ -293,11 +333,21 @@ def prepare_v2(data: dict, seed: str) -> tuple[dict, dict]:
         "distribution_instruction": "Give each judge only its matching entry from judge_packets. Never give a judge this bundle or the key.",
         "judge_packets": judge_packets,
     }
+    runner_provenance = [
+        {
+            "comparison_id": comparison_id,
+            "baseline": trial["baseline"]["provenance"],
+            "treatment": trial["treatment"]["provenance"],
+        }
+        for _, trial, comparison_id in comparisons
+    ]
     key = {
         "version": 2, "packet_hash": digest(packet), "seed": seed,
         "gate": data.get("gate", {"minimum_overall_delta": 5}),
         "rubric": data["rubric"], "mappings": mappings,
         "trigger_tests": data.get("trigger_tests", []),
+        "execution_policy": data["execution_policy"],
+        "runner_provenance": runner_provenance,
     }
     return packet, key
 
@@ -390,6 +440,35 @@ def validate_judgment_v2(packet: dict, key: dict, judgment: dict) -> None:
     actual_ids = [j.get("judge_id") for j in actual if isinstance(j, dict)]
     if set(actual_ids) != set(expected) or len(actual_ids) != len(expected):
         raise Invalid("judgment must contain every judge packet exactly once")
+    expected_comparison_ids = {
+        comparison_id for comparisons in expected.values() for comparison_id in comparisons
+    }
+    validate_execution_policy({"execution_policy": key.get("execution_policy")})
+    runner_provenance = key.get("runner_provenance")
+    if not isinstance(runner_provenance, list):
+        raise Invalid("v2 key runner_provenance must be an array")
+    provenance_ids = [item.get("comparison_id") for item in runner_provenance if isinstance(item, dict)]
+    if set(provenance_ids) != expected_comparison_ids or len(provenance_ids) != len(expected_comparison_ids):
+        raise Invalid("v2 key runner_provenance must cover every comparison exactly once")
+    runner_context_ids = set()
+    for item in runner_provenance:
+        for role in ("baseline", "treatment"):
+            provenance = validate_native_provenance(
+                item.get(role), f"runner {item.get('comparison_id')} {role} provenance"
+            )
+            context_id = provenance["context_id"]
+            if context_id in runner_context_ids:
+                raise Invalid(f"runner context_id must be unique: {context_id}")
+            runner_context_ids.add(context_id)
+    judge_context_ids = set()
+    for judge in actual:
+        provenance = validate_native_provenance(
+            judge.get("provenance"), f"judge {judge.get('judge_id')} provenance"
+        )
+        context_id = provenance["context_id"]
+        if context_id in runner_context_ids or context_id in judge_context_ids:
+            raise Invalid(f"judge context_id must be fresh and unique: {context_id}")
+        judge_context_ids.add(context_id)
     rubric_items = key.get("rubric")
     if not isinstance(rubric_items, list):
         raise Invalid("v2 key rubric is missing")
@@ -679,6 +758,14 @@ def decide_v2(packet: dict, key: dict, judgment: dict) -> dict:
             "results": trigger_results, "heldout_failures": heldout_trigger_failures,
         },
         "judge_agreement": agreement_report(winners, judge_ids, heldout_ids),
+        "execution_provenance": {
+            "policy": key["execution_policy"],
+            "runners": key["runner_provenance"],
+            "judges": [
+                {"judge_id": judge["judge_id"], **judge["provenance"]}
+                for judge in judgment["judgments"]
+            ],
+        },
         "packet_hash": digest(packet),
     }
 

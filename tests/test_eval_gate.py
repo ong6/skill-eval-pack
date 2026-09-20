@@ -14,8 +14,28 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(gate)
 
 
+_context_counter = 0
+
+
+def native_provenance(prefix="runner"):
+    global _context_counter
+    _context_counter += 1
+    return {
+        "mechanism": "host-native-subagent",
+        "agent_id": f"{prefix}-{_context_counter}",
+        "context_id": f"context-{_context_counter}",
+        "fresh_context": True,
+        "recursive_ai_cli_spawned": False,
+        "details": "Spawned through the host collaboration tool.",
+    }
+
+
 def run(output, graded=False):
-    result = {"transcript": f"transcript: {output}", "outcome": output}
+    result = {
+        "transcript": f"transcript: {output}",
+        "outcome": output,
+        "provenance": native_provenance(),
+    }
     if graded:
         result["grader_result"] = {"passed": True, "details": "PASS: exact result matched"}
     return result
@@ -26,6 +46,12 @@ def v2_input(judge_count=2):
         "version": 2,
         "title": "Candidate evaluation",
         "judge_count": judge_count,
+        "execution_policy": {
+            "runner_mechanism": "host-native-subagent",
+            "judge_mechanism": "host-native-subagent",
+            "max_active_agents": 4,
+            "recursive_ai_cli_allowed": False,
+        },
         "rubric": [
             {"id": "core", "label": "Core behavior", "weight": 2, "max_score": 5, "core": True},
             {"id": "quality", "label": "Quality", "weight": 1, "max_score": 5, "core": False},
@@ -95,7 +121,11 @@ def judgment_for(packet, key, scores=None, failures=None):
                     for label in ("A", "B")
                 },
             })
-        judgments.append({"judge_id": judge_id, "comparisons": comparisons})
+        judgments.append({
+            "judge_id": judge_id,
+            "provenance": native_provenance("judge"),
+            "comparisons": comparisons,
+        })
     return {"version": 2, "judgments": judgments}
 
 
@@ -112,6 +142,36 @@ class V2Tests(unittest.TestCase):
         self.assertIn("transcript", first)
         self.assertIn("outcome", first)
         self.assertIn("grader_result", first)
+        self.assertNotIn("provenance", first)
+        self.assertEqual("host-native-subagent", key["runner_provenance"][0]["baseline"]["mechanism"])
+
+    def test_recursive_cli_runner_provenance_is_rejected(self):
+        data = v2_input()
+        provenance = data["cases"][0]["trials"][0]["baseline"]["provenance"]
+        provenance["mechanism"] = "codex-exec"
+        provenance["recursive_ai_cli_spawned"] = True
+        with self.assertRaisesRegex(gate.Invalid, "mechanism must be host-native-subagent"):
+            gate.prepare(data, "seed")
+
+    def test_wrong_or_missing_execution_policy_is_rejected(self):
+        data = v2_input()
+        data["execution_policy"]["max_active_agents"] = 16
+        with self.assertRaisesRegex(gate.Invalid, "execution_policy must equal"):
+            gate.prepare(data, "seed")
+
+    def test_judge_provenance_must_be_native_and_fresh(self):
+        packet, key = gate.prepare(v2_input(), "seed")
+        judgment = judgment_for(packet, key)
+        judgment["judgments"][0]["provenance"]["mechanism"] = "claude-print"
+        with self.assertRaisesRegex(gate.Invalid, "mechanism must be host-native-subagent"):
+            gate.decide(packet, key, judgment)
+
+        judgment = judgment_for(packet, key)
+        judgment["judgments"][0]["provenance"]["context_id"] = (
+            key["runner_provenance"][0]["baseline"]["context_id"]
+        )
+        with self.assertRaisesRegex(gate.Invalid, "fresh and unique"):
+            gate.decide(packet, key, judgment)
 
     def test_heldout_only_gate_ignores_bad_development_results(self):
         packet, key = gate.prepare(v2_input(), "seed")
@@ -123,6 +183,7 @@ class V2Tests(unittest.TestCase):
         }
         result = gate.decide(packet, key, judgment_for(packet, key, scores))
         self.assertEqual("keep", result["decision"])
+        self.assertEqual("host-native-subagent", result["execution_provenance"]["policy"]["runner_mechanism"])
         self.assertEqual("heldout_only", result["gate_scope"])
         self.assertEqual(0, result["development_case_wins"]["treatment"])
         self.assertGreater(result["score_dispersion"]["heldout"]["treatment"]["stdev"], -1)

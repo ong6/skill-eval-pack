@@ -15,6 +15,12 @@ behavior can vary; such cases require at least two trials.
       "version": 2,
       "title": "Source distinction skill",
       "judge_count": 2,
+      "execution_policy": {
+        "runner_mechanism": "host-native-subagent",
+        "judge_mechanism": "host-native-subagent",
+        "max_active_agents": 4,
+        "recursive_ai_cli_allowed": false
+      },
       "rubric": [
         {"id": "accuracy", "label": "Factual accuracy", "weight": 2, "max_score": 5, "core": true},
         {"id": "clarity", "label": "Clear and concise", "weight": 1, "max_score": 5, "core": false}
@@ -35,11 +41,27 @@ behavior can vary; such cases require at least two trials.
               "baseline": {
                 "transcript": "Verbatim no-skill transcript",
                 "outcome": "Verbatim outcome",
+                "provenance": {
+                  "mechanism": "host-native-subagent",
+                  "agent_id": "runner-a",
+                  "context_id": "fresh-context-a",
+                  "fresh_context": true,
+                  "recursive_ai_cli_spawned": false,
+                  "details": "Spawned through the host collaboration tool"
+                },
                 "grader_result": {"passed": true, "details": "Verbatim deterministic grader result"}
               },
               "treatment": {
                 "transcript": "Verbatim candidate transcript",
                 "outcome": "Verbatim outcome",
+                "provenance": {
+                  "mechanism": "host-native-subagent",
+                  "agent_id": "runner-b",
+                  "context_id": "fresh-context-b",
+                  "fresh_context": true,
+                  "recursive_ai_cli_spawned": false,
+                  "details": "Spawned through the host collaboration tool"
+                },
                 "grader_result": {"passed": true, "details": "Verbatim deterministic grader result"}
               }
             }
@@ -54,13 +76,13 @@ behavior can vary; such cases require at least two trials.
           "trials": [
             {
               "id": "trial-1",
-              "baseline": {"transcript": "Verbatim transcript", "outcome": "Verbatim outcome"},
-              "treatment": {"transcript": "Verbatim transcript", "outcome": "Verbatim outcome"}
+              "baseline": {"transcript": "Verbatim transcript", "outcome": "Verbatim outcome", "provenance": {"mechanism": "host-native-subagent", "agent_id": "runner-c", "context_id": "fresh-context-c", "fresh_context": true, "recursive_ai_cli_spawned": false, "details": "Spawned through the host collaboration tool"}},
+              "treatment": {"transcript": "Verbatim transcript", "outcome": "Verbatim outcome", "provenance": {"mechanism": "host-native-subagent", "agent_id": "runner-d", "context_id": "fresh-context-d", "fresh_context": true, "recursive_ai_cli_spawned": false, "details": "Spawned through the host collaboration tool"}}
             },
             {
               "id": "trial-2",
-              "baseline": {"transcript": "Verbatim transcript", "outcome": "Verbatim outcome"},
-              "treatment": {"transcript": "Verbatim transcript", "outcome": "Verbatim outcome"}
+              "baseline": {"transcript": "Verbatim transcript", "outcome": "Verbatim outcome", "provenance": {"mechanism": "host-native-subagent", "agent_id": "runner-e", "context_id": "fresh-context-e", "fresh_context": true, "recursive_ai_cli_spawned": false, "details": "Spawned through the host collaboration tool"}},
+              "treatment": {"transcript": "Verbatim transcript", "outcome": "Verbatim outcome", "provenance": {"mechanism": "host-native-subagent", "agent_id": "runner-f", "context_id": "fresh-context-f", "fresh_context": true, "recursive_ai_cli_spawned": false, "details": "Spawned through the host collaboration tool"}}
             }
           ]
         },
@@ -73,8 +95,8 @@ behavior can vary; such cases require at least two trials.
           "trials": [
             {
               "id": "trial-1",
-              "baseline": {"transcript": "Verbatim transcript", "outcome": "Verbatim outcome"},
-              "treatment": {"transcript": "Verbatim transcript", "outcome": "Verbatim outcome"}
+              "baseline": {"transcript": "Verbatim transcript", "outcome": "Verbatim outcome", "provenance": {"mechanism": "host-native-subagent", "agent_id": "runner-g", "context_id": "fresh-context-g", "fresh_context": true, "recursive_ai_cli_spawned": false, "details": "Spawned through the host collaboration tool"}},
+              "treatment": {"transcript": "Verbatim transcript", "outcome": "Verbatim outcome", "provenance": {"mechanism": "host-native-subagent", "agent_id": "runner-h", "context_id": "fresh-context-h", "fresh_context": true, "recursive_ai_cli_spawned": false, "details": "Spawned through the host collaboration tool"}}
             }
           ]
         }
@@ -99,7 +121,11 @@ behavior can vary; such cases require at least two trials.
       ]
     }
 
-Version 2 requires development and heldout behavioral cases. trigger_tests is optional; when
+Version 2 requires the exact execution_policy above and provenance on every run. Each runner needs
+a unique fresh context_id, mechanism host-native-subagent, and recursive_ai_cli_spawned false. The
+helper stores provenance in the secret key and strips it from blinded judge packets. A missing or
+CLI-derived provenance record makes the bundle invalid before judging. Version 2 also requires
+development and heldout behavioral cases. trigger_tests is optional; when
 present it records routing separately and any heldout mismatch retires the candidate. A
 deterministic_grader is optional only where no mechanical check is possible. When one is declared,
 every baseline and treatment run must include grader_result with a boolean passed and non-empty
@@ -133,6 +159,14 @@ Collect each independent response unchanged under judgments:
       "judgments": [
         {
           "judge_id": "judge-1",
+          "provenance": {
+            "mechanism": "host-native-subagent",
+            "agent_id": "judge-a",
+            "context_id": "fresh-judge-context-a",
+            "fresh_context": true,
+            "recursive_ai_cli_spawned": false,
+            "details": "Spawned through the host collaboration tool"
+          },
           "comparisons": [
             {
               "comparison_id": "heldout-edge-case::trial-1",
@@ -153,6 +187,14 @@ Collect each independent response unchanged under judgments:
         },
         {
           "judge_id": "judge-2",
+          "provenance": {
+            "mechanism": "host-native-subagent",
+            "agent_id": "judge-b",
+            "context_id": "fresh-judge-context-b",
+            "fresh_context": true,
+            "recursive_ai_cli_spawned": false,
+            "details": "Spawned through the host collaboration tool"
+          },
           "comparisons": ["Every comparison from judge-2's packet, using the same object schema"]
         }
       ]
@@ -162,6 +204,8 @@ Every judge must score every comparison exactly once. Scores are normalized by e
 maximum and then weighted. The decision reports development and heldout score dispersion, case
 wins, and per-judge/pairwise agreement. The keep gate uses heldout aggregates only. The treatment
 critical-failure gate is a strict union: one heldout failure from one judge is sufficient to retire.
+Each judge must also provide native provenance with a fresh context_id distinct from every runner
+and other judge; the decision refuses missing, recursive-CLI, reused, or non-native provenance.
 Failure strings must exactly match the frozen critical_failures taxonomy. The helper also verifies
 that each evidence_quote occurs in the matching anonymous run and that winner matches the weighted
 scores, with exact equality requiring tie.

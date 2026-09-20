@@ -7,7 +7,9 @@ applies a machine-checked keep-or-retire gate.
 
 It complements Skillforge (https://github.com/ong6/skillforge): Skillforge stores rigorous frozen
 evaluation bundles and baseline deltas; this pack makes evaluation a required part of skill creation
-and supplies the blind judging and lifecycle decision. It never calls a model itself.
+and supplies the blind judging and lifecycle decision. It never calls a model itself. Version 2
+also requires structured proof that runners and judges came from fresh host-native subagents;
+recursive `codex exec`, `claude -p`, and equivalent nested client runs are rejected.
 
 ## Install
 
