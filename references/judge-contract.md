@@ -191,3 +191,41 @@ Existing version 1 input remains valid:
 
 The version 1 packet, judgment (version 1 with a pairs array), scoring, and decision schema are
 unchanged. Use it only to reproduce or finish an existing v1 evaluation; use v2 for new work.
+
+## Revision-loop evidence
+
+The helper decides one candidate attempt. The orchestrator must retain a manifest across attempts:
+
+    {
+      "candidate_kind": "new",
+      "maximum_serious_revisions": 3,
+      "attempts": [
+        {
+          "revision": 1,
+          "development_evidence": ["dev-case-id"],
+          "change": "Specific behavioral change justified by that evidence",
+          "heldout_set": "heldout-set-1",
+          "decision": "retire",
+          "heldout_retired": true
+        }
+      ],
+      "terminal_action": "continue"
+    }
+
+candidate_kind is new or existing_revision. For an existing revision, also record the immutable
+last_proven_version reference before the first attempt. Each revision number represents a serious
+candidate version, including the initial candidate. The default maximum is three unless the user
+sets another bound.
+
+After a failed gate, use the failure to create or refine development coverage before revising. If
+any heldout transcript, outcome, deterministic result, or judge result informed the change, set
+heldout_retired to true and use an entirely new heldout_set on the next attempt. Do not optimize
+against unexplained score variance or repeatedly rerun judges to obtain a pass.
+
+Terminal actions are:
+
+- pass: activate the candidate.
+- exhausted + new: archive the candidate and remove it from active discovery.
+- exhausted + existing_revision: restore last_proven_version and retain failed evidence.
+- noisy: stop early, preserve the last proven state, and report that judgment noise prevented a
+  trustworthy improvement claim.

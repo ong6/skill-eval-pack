@@ -34,6 +34,14 @@ that skill. Run this workflow during skill creation, before declaring the skill 
 - Keep only a clear heldout improvement. A tie, cosmetic change, missing run, core regression, or
   any heldout treatment critical failure reported by any judge fails. A failed heldout deterministic
   grader or heldout trigger test also fails.
+- A failed candidate starts a bounded improve-and-retest loop; it is not the terminal action by
+  itself. Default to at most three serious candidate revisions unless the user sets another bound.
+  A serious revision must address observed behavior, not merely rewrite wording to chase a noisy
+  judge score.
+- Distinguish lifecycle state before testing. For a new skill, keep the candidate out of permanent
+  discovery until it passes and archive it only after the bounded serious attempts are exhausted.
+  For a revision to an existing proven skill, preserve the last proven version and restore it if
+  the revised candidate exhausts the bound without passing.
 
 Use Skillforge (https://github.com/ong6/skillforge) when available to freeze and retain the full
 evaluation bundle. It owns model/case/version provenance and baseline deltas. This pack owns the
@@ -72,10 +80,21 @@ usable when Skillforge is unavailable.
    regression, improve at least one core criterion, and have an empty union of heldout treatment
    critical failures across judges. Any heldout treatment deterministic-grader failure or heldout
    trigger mismatch also retires the candidate. Never override a failure by editorial judgment.
-9. **Keep or retire.** On pass, leave the skill active and rerun both clients' skill validation. On
-   failure, tell the human plainly and follow the repository's retirement policy without deleting
-   evidence. A future attempt needs fresh heldouts.
-10. **Report.** Give the decision, heldout scores and delta, score dispersion, per-case winners,
+9. **Improve and retest after failure.** Diagnose the failure from deterministic checks,
+   transcripts, outcomes, and judge evidence. First add or refine development cases that reproduce
+   it, then make one serious candidate revision and rerun development trials. If the failed heldout
+   result informed the revision, mark every exposed heldout and its judge packets retired; freeze
+   genuinely new heldouts before the next gate. Never reuse exposed cases under new names. Repeat
+   automatically until a candidate passes or the revision bound is exhausted. The default bound is
+   three serious candidate revisions total, including the initial candidate; a user-specified bound
+   replaces it. Stop early when the remaining signal is only inconsistent or noisy judge scoring.
+10. **Keep, restore, or archive.** On pass, leave the candidate active and rerun both clients' skill
+    validation. When the bound is exhausted, archive a new skill under the repository's documented
+    no-delete policy. For a failed revision of an existing skill, restore the saved last proven
+    version instead and retain the failed candidates and evidence outside active discovery.
+11. **Report.** Give the decision, every attempted revision and the evidence-driven change it made,
+    the stopping reason and bound, heldout sets retired or replaced, heldout scores and delta,
+    score dispersion, per-case winners,
     per-judge and pairwise agreement, the strict critical-failure union, trial count,
     model/isolation limitations, active or retired path, and Claude/Codex validation results.
 
@@ -118,3 +137,7 @@ transcripts, and outputs; keep them out of public repositories unless reviewed.
 | Average away one judge's critical failure | Union critical failures; any heldout treatment failure retires |
 | Let strong development results rescue weak heldouts | Gate only on heldout cases |
 | Keep a tie because the skill sounds useful | Retire it; extra prompt cost needs measured benefit |
+| Archive on the first failed candidate | Improve from development evidence and use the bounded retest loop |
+| Tune against an exposed heldout | Retire it and freeze a genuinely new heldout before retesting |
+| Leave a failed revision active | Restore the last proven version after the attempt bound is exhausted |
+| Keep rerunning until judges happen to agree | Stop on noisy signal and report the bounded attempts |
