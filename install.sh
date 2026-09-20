@@ -33,7 +33,7 @@ cp "$source_dir/scripts/eval_gate.py" "$target/scripts/eval_gate.py"
 chmod +x "$target/scripts/eval_gate.py"
 
 if [ -x "$repo/.agents/sync-skills.sh" ]; then
-  bash "$repo/.agents/sync-skills.sh"
+  (cd "$repo" && bash .agents/sync-skills.sh)
 else
   if [ -e "$codex_link" ] || [ -L "$codex_link" ]; then
     [ "$force" -eq 1 ] || { printf 'Codex target exists: %s\n' "$codex_link" >&2; exit 2; }
