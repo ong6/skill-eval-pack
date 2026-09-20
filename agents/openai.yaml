@@ -1,0 +1,7 @@
+interface:
+  display_name: "Skill Eval Pack"
+  short_description: "A/B test a skill before keeping it"
+  default_prompt: "Use $skill-eval-pack to compare this skill against a no-skill baseline and keep it only if the blinded evaluation passes."
+
+policy:
+  allow_implicit_invocation: true
