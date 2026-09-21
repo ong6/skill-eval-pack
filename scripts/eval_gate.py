@@ -642,6 +642,10 @@ def validate_judgment_v2(packet: dict, key: dict, judgment: dict) -> None:
     validate_execution_policy({"execution_policy": key.get("execution_policy")})
     if version >= 3:
         validate_condition_manifest({"condition_manifest": key.get("condition_manifest")})
+        validate_client_coverage({
+            "condition_manifest": key.get("condition_manifest"),
+            "client_coverage": key.get("client_coverage"),
+        })
         calibration_key = key.get("judge_calibration")
         if not isinstance(calibration_key, dict):
             raise Invalid("v3 key judge_calibration must be an object")
