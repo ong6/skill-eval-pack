@@ -30,8 +30,12 @@ that skill. Run this workflow during skill creation, before declaring the skill 
 - Use the current host's native subagent mechanism for runners and judges. Never launch `codex`,
   `claude`, or another agent CLI from a shell, script, hook, or nested agent: recursive clients can
   inherit the wrong configuration, multiply processes, exhaust quotas, and invalidate isolation.
-  Keep at most four evaluation agents active at once, including nested children; use one at a time
-  when the host cannot report or enforce the active count.
+  The top-level host coordinator is the only component allowed to create evaluation agents. Skills,
+  scripts, runners, and judges must not create children; every runner and judge prompt must say not
+  to launch processes or subagents. Keep at most four evaluation agents active at once and use one
+  at a time when the host cannot report or enforce the active count. A host-native collaboration
+  agent is admissible even when the host UI labels its worker as Codex; a new CLI process or session
+  created by skill code is not.
 - Record structured native provenance for every runner and judge. Version 3 inputs must declare the
   fixed execution policy and matched condition manifest from `references/judge-contract.md`; each
   run and judgment must include a unique fresh host context and a retained native receipt. The
@@ -77,7 +81,9 @@ usable when Skillforge is unavailable.
    matched contexts. Use multiple trials for stochastic behavior. Review complete transcripts,
    tool use, artifacts, deterministic grader results, and final outcomes. Fix the skill using only
    development evidence. Spawn these runs only through the host's native subagent tool, never by
-   invoking an AI CLI in a shell command or generated harness.
+   invoking an AI CLI in a shell command or generated harness. The coordinator calls the host
+   collaboration API directly; never put agent-spawn instructions inside a skill, runner, judge,
+   script, hook, or generated artifact.
 4. **Freeze fresh heldouts.** Write unseen heldout behavioral cases only after iteration stops. Do
    not tune against these cases. If routing is in scope, freeze separate positive and negative
    trigger tests too.

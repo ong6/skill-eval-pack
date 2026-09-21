@@ -10,18 +10,19 @@ import json
 import math
 from pathlib import Path
 import random
+import re
 import statistics
 import sys
 
 
 SHA256_LENGTH = 64
 RECURSIVE_AI_CLI = tuple(
-    " ".join(parts) for parts in (
-        ("co" + "dex", "ex" + "ec"),
-        ("clau" + "de", "-p"),
-        ("clau" + "de", "--print"),
-        ("gem" + "ini", "-p"),
-        ("ai" + "der", "--message"),
+    re.compile(pattern, re.I | re.S)
+    for pattern in (
+        r"\bcodex\b.{0,80}\bexec\b",
+        r"\bclaude\b.{0,80}(?:-p|--print)\b",
+        r"\bgemini\b.{0,80}(?:-p|--prompt)\b",
+        r"\baider\b.{0,80}--message\b",
     )
 )
 
@@ -156,6 +157,14 @@ def validate_native_provenance(value: object, field: str, *, require_receipt: bo
         require_text(receipt.get("issued_at"), f"{field}.native_receipt.issued_at")
         if receipt.get("launcher") != "host-collaboration-api":
             raise Invalid(f"{field}.native_receipt.launcher must be host-collaboration-api")
+        coordinator_id = require_text(
+            receipt.get("coordinator_id"), f"{field}.native_receipt.coordinator_id"
+        )
+        if receipt.get("parent_agent_id") != coordinator_id:
+            raise Invalid(
+                f"{field}.native_receipt.parent_agent_id must equal coordinator_id; "
+                "nested evaluator agents are forbidden"
+            )
         agent_tree = require_text(receipt.get("agent_tree_snapshot"), f"{field}.native_receipt.agent_tree_snapshot")
         process_snapshot = require_text(
             receipt.get("process_snapshot"), f"{field}.native_receipt.process_snapshot"
@@ -166,8 +175,7 @@ def validate_native_provenance(value: object, field: str, *, require_receipt: bo
             raise Invalid(f"{field}.native_receipt.agent_tree_sha256 does not match retained snapshot")
         if require_sha256(receipt.get("process_snapshot_sha256"), f"{field}.native_receipt.process_snapshot_sha256") != digest(process_snapshot):
             raise Invalid(f"{field}.native_receipt.process_snapshot_sha256 does not match retained snapshot")
-        lowered_snapshot = process_snapshot.lower()
-        detected = [command for command in RECURSIVE_AI_CLI if command in lowered_snapshot]
+        detected = [pattern.pattern for pattern in RECURSIVE_AI_CLI if pattern.search(process_snapshot)]
         if detected:
             raise Invalid(f"{field}.native_receipt process snapshot contains recursive AI CLI launch")
         if receipt.get("recursive_ai_cli_matches") != []:
@@ -411,6 +419,13 @@ def validate_input_v3(data: dict) -> None:
                     role=role, condition_hash=condition_hash, baseline_hash=baseline_hash,
                     treatment_hash=treatment_hash,
                 )
+    coordinator_ids = {
+        trial[role]["provenance"]["native_receipt"]["coordinator_id"]
+        for case in data["cases"] for trial in case["trials"]
+        for role in ("baseline", "treatment")
+    }
+    if len(coordinator_ids) != 1:
+        raise Invalid("all v3 runners must be direct children of one coordinator")
 
 
 def validate_input(data: dict) -> None:
@@ -691,6 +706,11 @@ def validate_judgment_v2(packet: dict, key: dict, judgment: dict) -> None:
             raise Invalid(f"judge context_id must be fresh and unique: {context_id}")
         judge_context_ids.add(context_id)
         if version >= 3:
+            if provenance["native_receipt"]["coordinator_id"] != next(iter({
+                item[role]["native_receipt"]["coordinator_id"]
+                for item in runner_provenance for role in ("baseline", "treatment")
+            })):
+                raise Invalid("v3 judges and runners must share the top-level coordinator")
             calibration = judge.get("calibration")
             if not isinstance(calibration, dict):
                 raise Invalid(f"judge {judge.get('judge_id')} calibration must be an object")

@@ -61,6 +61,8 @@ not written from the runner's own claim:
       "event_id": "host event identifier",
       "issued_at": "ISO-8601 timestamp",
       "launcher": "host-collaboration-api",
+      "coordinator_id": "top-level host coordinator ID",
+      "parent_agent_id": "must equal coordinator_id",
       "agent_tree_snapshot": "retained host-native agent tree evidence",
       "agent_tree_sha256": "canonical JSON SHA-256 of agent_tree_snapshot",
       "process_snapshot": "descendant-scoped process evidence",
@@ -71,7 +73,10 @@ not written from the runner's own claim:
 
 The helper verifies both snapshot hashes and scans the descendant snapshot for recursive AI CLI
 commands. A global machine process list is not enough because an unrelated interactive Claude or
-Codex session may legitimately exist outside the evaluation tree.
+Codex session may legitimately exist outside the evaluation tree. The top-level host coordinator
+must create every runner and judge through its native collaboration API. Skills, scripts, runners,
+and judges cannot create child agents or sessions. A host UI may internally label a native worker
+as Codex; that is not recursive execution unless skill-controlled code starts a new CLI process.
 
 Every run records non-negative elapsed_ms, input_tokens, output_tokens, tool_calls, and errors under
 metrics. If the host cannot expose a metric, use null and add a non-empty reason under

@@ -23,7 +23,8 @@ def native_receipt(agent_id, context_id):
     return {
         "host": "trae", "agent_id": agent_id, "context_id": context_id,
         "event_id": f"event-{context_id}", "issued_at": "2026-09-21T12:00:00Z",
-        "launcher": "host-collaboration-api", "agent_tree_snapshot": agent_tree,
+        "launcher": "host-collaboration-api", "coordinator_id": "root",
+        "parent_agent_id": "root", "agent_tree_snapshot": agent_tree,
         "agent_tree_sha256": gate.digest(agent_tree), "process_snapshot": process_snapshot,
         "process_snapshot_sha256": gate.digest(process_snapshot),
         "process_snapshot_scope": "evaluator-descendants", "recursive_ai_cli_matches": [],
@@ -334,6 +335,21 @@ class V3Tests(unittest.TestCase):
         receipt["process_snapshot"] = "child: codex exec --json"
         receipt["process_snapshot_sha256"] = gate.digest(receipt["process_snapshot"])
         with self.assertRaisesRegex(gate.Invalid, "contains recursive AI CLI launch"):
+            gate.prepare(data, "seed")
+
+    def test_v3_detects_split_argv_recursive_cli_in_retained_snapshot(self):
+        data = v3_input()
+        receipt = data["cases"][0]["trials"][0]["baseline"]["provenance"]["native_receipt"]
+        receipt["process_snapshot"] = "argv=['codex', '--quiet', 'exec', 'prompt']"
+        receipt["process_snapshot_sha256"] = gate.digest(receipt["process_snapshot"])
+        with self.assertRaisesRegex(gate.Invalid, "contains recursive AI CLI launch"):
+            gate.prepare(data, "seed")
+
+    def test_v3_rejects_nested_evaluator_agent(self):
+        data = v3_input()
+        receipt = data["cases"][0]["trials"][0]["baseline"]["provenance"]["native_receipt"]
+        receipt["parent_agent_id"] = "runner-parent"
+        with self.assertRaisesRegex(gate.Invalid, "nested evaluator agents are forbidden"):
             gate.prepare(data, "seed")
 
     def test_v3_rejects_condition_mismatch(self):
