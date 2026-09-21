@@ -11,6 +11,9 @@ Retrieved 2026-09-21. These sources informed the pack's contract; they are not r
 - [Anthropic skills: skill-creator](https://github.com/anthropics/skills/tree/main/skills/skill-creator)
   is a concrete public implementation of skill generation, evaluation, blind comparison, and
   iterative improvement.
+- [Anthropic: Skill authoring best practices](https://docs.anthropic.com/en/docs/agents-and-tools/agent-skills/best-practices)
+  recommends evaluation-driven development: define representative cases first, establish the
+  no-skill baseline, add only the instructions needed to close observed gaps, then iterate.
 - [OpenAI: Evals design guide](https://platform.openai.com/docs/guides/evals)
   supports defining the objective and dataset before execution, combining metrics, and continuous
   evaluation as prompts and models change.
