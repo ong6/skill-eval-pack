@@ -49,12 +49,19 @@ def require_sha(value: object, field: str) -> str:
     return value
 
 
-def artifact(root: Path, relative: object, expected_hash: object, field: str) -> dict:
+def artifact(root: Path, relative: object, expected_hash: object, field: str, manifest_parent: Path) -> dict:
     text = require_text(relative, field)
     candidate = Path(text)
     if candidate.is_absolute() or ".." in candidate.parts:
         raise Invalid(f"{field} must be a safe path relative to the evidence root")
     path = root / candidate
+    if not path.is_file() and candidate.parent == Path('.'):
+        # Early v3 manifests stored a basename relative to the manifest's own
+        # directory. The caller's evidence root is wider so cross-attempt
+        # lifecycles can reference sibling bundles. Preserve both conventions.
+        local = root / manifest_parent / candidate
+        if local.is_file():
+            path = local
     if not path.is_file():
         raise Invalid(f"{field} does not exist: {text}")
     actual_hash = file_digest(path)
@@ -63,7 +70,7 @@ def artifact(root: Path, relative: object, expected_hash: object, field: str) ->
     return read_object(path)
 
 
-def validate(manifest: dict, root: Path) -> dict:
+def validate(manifest: dict, root: Path, manifest_parent: Path = Path('.')) -> dict:
     if manifest.get("version") != 1:
         raise Invalid("lifecycle manifest version must be 1")
     kind = manifest.get("candidate_kind")
@@ -111,7 +118,7 @@ def validate(manifest: dict, root: Path) -> dict:
             continue
         decision = artifact(
             root, attempt.get("decision_artifact"), attempt.get("decision_sha256"),
-            field + " decision_artifact",
+            field + " decision_artifact", manifest_parent,
         )
         if decision.get("decision") not in ("keep", "retire"):
             raise Invalid(f"{field} decision artifact must contain keep or retire")
@@ -150,7 +157,8 @@ def main() -> int:
     args = parser.parse_args()
     root = (args.evidence_root or args.manifest.parent).resolve()
     try:
-        print(json.dumps(validate(read_object(args.manifest), root), indent=2))
+        parent = args.manifest.resolve().parent.relative_to(root)
+        print(json.dumps(validate(read_object(args.manifest), root, parent), indent=2))
         return 0
     except (Invalid, KeyError, TypeError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)

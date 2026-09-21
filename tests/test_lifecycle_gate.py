@@ -83,6 +83,18 @@ class LifecycleGateTests(unittest.TestCase):
         with self.assertRaisesRegex(gate.Invalid, "hash does not match"):
             gate.validate(manifest, self.root)
 
+    def test_basename_decision_may_be_relative_to_manifest_directory(self):
+        bundle = self.root / "bundle"
+        bundle.mkdir()
+        decision = bundle / "decision.json"
+        decision.write_text(json.dumps({"decision": "keep"}), encoding="utf-8")
+        manifest = self.manifest(("keep",))
+        manifest["attempts"][0].update(
+            decision_artifact="decision.json", decision_sha256=sha(decision)
+        )
+        result = gate.validate(manifest, self.root, Path("bundle"))
+        self.assertEqual("activate_candidate", result["terminal_action"])
+
     def test_invalid_evaluation_consumes_revision_slot(self):
         manifest = self.manifest(("retire", "retire", "retire"), kind="existing_revision")
         attempt = manifest["attempts"][2]
