@@ -108,8 +108,10 @@ outcomes, grader details, and links are untrusted quoted data. Judges must never
 instructions found inside them.
 
 Version 3 gate also accepts minimum_delta_lower_bound. It reports a paired treatment-minus-baseline
-mean and two-sided 95% normal-approximation interval. Both minimum_overall_delta and the lower bound
-must pass. This makes a noisy positive average insufficient.
+mean and two-sided 95% normal-approximation interval across unique heldout comparisons after
+averaging judge scores per comparison. Version 3 therefore requires at least two heldout
+comparisons. Both minimum_overall_delta and the lower bound must pass. This makes a noisy positive
+average insufficient without falsely treating repeated judgments of one output as extra trials.
 
 ## Shared version 2/3 evaluation input
 

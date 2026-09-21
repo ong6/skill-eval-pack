@@ -390,6 +390,11 @@ def validate_input_v3(data: dict) -> None:
     shadow = dict(data)
     shadow["version"] = 2
     validate_input_v2(shadow)
+    heldout_comparisons = sum(
+        len(case["trials"]) for case in data["cases"] if case["split"] == "heldout"
+    )
+    if heldout_comparisons < 2:
+        raise Invalid("v3 requires at least two heldout comparisons for uncertainty gating")
     for case in data["cases"]:
         for trial in case["trials"]:
             for role in ("baseline", "treatment"):
@@ -916,6 +921,7 @@ def decide_v2(packet: dict, key: dict, judgment: dict) -> dict:
         for split in ("development", "heldout")
     }
     case_scores = defaultdict(lambda: {"baseline": [], "treatment": []})
+    comparison_scores = defaultdict(lambda: {"baseline": [], "treatment": []})
     failures = {split: {role: [] for role in ("baseline", "treatment")} for split in ("development", "heldout")}
     winners = {}
     judge_ids = [judge["judge_id"] for judge in judgment["judgments"]]
@@ -943,6 +949,7 @@ def decide_v2(packet: dict, key: dict, judgment: dict) -> dict:
                 score = weighted_score(comparison["scores"][label], rubric)
                 totals[split][role].append(score)
                 case_scores[(split, mapping["case_id"])][role].append(score)
+                comparison_scores[(split, comparison_id)][role].append(score)
                 for criterion in rubric:
                     normalized = comparison["scores"][label][criterion["id"]]["score"] / criterion["max_score"] * 100
                     criterion_totals[split][role][criterion["id"]].append(normalized)
@@ -985,7 +992,16 @@ def decide_v2(packet: dict, key: dict, judgment: dict) -> dict:
     }
     heldout_means = {role: score_summary["heldout"][role]["mean"] for role in ("baseline", "treatment")}
     delta = round(heldout_means["treatment"] - heldout_means["baseline"], 2)
-    paired_delta = paired_delta_summary(totals["heldout"]["baseline"], totals["heldout"]["treatment"])
+    heldout_comparison_means = {
+        role: [
+            statistics.mean(values[role])
+            for (split, _), values in sorted(comparison_scores.items()) if split == "heldout"
+        ]
+        for role in ("baseline", "treatment")
+    }
+    paired_delta = paired_delta_summary(
+        heldout_comparison_means["baseline"], heldout_comparison_means["treatment"]
+    )
     minimum = key.get("gate", {}).get("minimum_overall_delta", 5)
     core_deltas = [
         criterion_scores["heldout"]["treatment"][r["id"]] - criterion_scores["heldout"]["baseline"][r["id"]]

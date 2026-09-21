@@ -349,6 +349,17 @@ class V3Tests(unittest.TestCase):
         with self.assertRaisesRegex(gate.Invalid, "exactly claude-code and codex"):
             gate.prepare(data, "seed")
 
+    def test_v3_requires_two_heldout_comparisons(self):
+        data = v3_input()
+        data["cases"][1]["split"] = "development"
+        with self.assertRaisesRegex(gate.Invalid, "at least two heldout comparisons"):
+            gate.prepare(data, "seed")
+
+    def test_v3_uncertainty_uses_unique_comparisons_not_duplicate_judges(self):
+        packet, key = gate.prepare(v3_input(judge_count=3), "seed")
+        result = gate.decide(packet, key, judgment_for(packet, key))
+        self.assertEqual(3, result["paired_delta"]["count"])
+
     def test_v3_rejects_uncalibrated_judge(self):
         packet, key = gate.prepare(v3_input(), "seed")
         judgment = judgment_for(packet, key)
