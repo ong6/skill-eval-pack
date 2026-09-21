@@ -83,6 +83,25 @@ class LifecycleGateTests(unittest.TestCase):
         with self.assertRaisesRegex(gate.Invalid, "hash does not match"):
             gate.validate(manifest, self.root)
 
+    def test_invalid_evaluation_consumes_revision_slot(self):
+        manifest = self.manifest(("retire", "retire", "retire"), kind="existing_revision")
+        attempt = manifest["attempts"][2]
+        attempt.pop("decision_artifact")
+        attempt.pop("decision_sha256")
+        attempt.update(invalid_evaluation=True, invalid_reason="reused heldout and missing hash")
+        result = gate.validate(manifest, self.root)
+        self.assertEqual(["retire", "retire", "invalid"], result["decision_sequence"])
+        self.assertEqual("restore_last_proven", result["terminal_action"])
+
+    def test_invalid_evaluation_must_retire_heldout(self):
+        manifest = self.manifest(("retire",))
+        attempt = manifest["attempts"][0]
+        attempt.pop("decision_artifact")
+        attempt.pop("decision_sha256")
+        attempt.update(invalid_evaluation=True, invalid_reason="contaminated", heldout_retired=False)
+        with self.assertRaisesRegex(gate.Invalid, "invalid heldout_set must be retired"):
+            gate.validate(manifest, self.root)
+
 
 if __name__ == "__main__":
     unittest.main()

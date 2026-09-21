@@ -382,8 +382,10 @@ The helper decides one candidate attempt. The orchestrator must retain a manifes
 
 candidate_kind is new or existing_revision. For an existing revision, also record the immutable
 last_proven_version reference before the first attempt. Each revision number represents a serious
-candidate version, including the initial candidate. The default maximum is three unless the user
-sets another bound.
+candidate version, including the initial candidate. A materially distinct candidate consumes its
+slot even if its evaluation is later found invalid or contaminated; invalidation retires the
+evidence, not the version count. The default maximum is three unless the user explicitly sets
+another bound.
 
 After a failed gate, use the failure to create or refine development coverage before revising. If
 any heldout transcript, outcome, deterministic result, or judge result informed the change, set
@@ -405,4 +407,5 @@ Use the machine gate before acting:
 The accepted terminal_action values are activate_candidate, continue, archive_candidate, and
 restore_last_proven. Failed attempts must retire their exposed heldout set. Attempt numbers and
 candidate hashes must be unique, and every decision path and hash must resolve to retained evidence.
-The normal maximum is three; a positive user-specified bound is also valid.
+The normal maximum is three; a positive user-specified bound is also valid, and only the user may
+reset or extend it. Invalid evidence never refunds a materially distinct candidate-version slot.

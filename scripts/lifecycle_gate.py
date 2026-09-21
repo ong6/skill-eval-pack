@@ -103,6 +103,12 @@ def validate(manifest: dict, root: Path) -> dict:
         if heldout_set in heldout_sets:
             raise Invalid(f"{field} reuses an exposed heldout_set")
         heldout_sets.add(heldout_set)
+        if attempt.get("invalid_evaluation") is True:
+            require_text(attempt.get("invalid_reason"), field + " invalid_reason")
+            if attempt.get("heldout_retired") is not True:
+                raise Invalid(f"{field} invalid heldout_set must be retired")
+            decisions.append("invalid")
+            continue
         decision = artifact(
             root, attempt.get("decision_artifact"), attempt.get("decision_sha256"),
             field + " decision_artifact",

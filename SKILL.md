@@ -57,7 +57,9 @@ that skill. Run this workflow during skill creation, before declaring the skill 
 - A failed candidate starts a bounded improve-and-retest loop; it is not the terminal action by
   itself. Default to at most three serious candidate revisions unless the user sets another bound.
   A serious revision must address observed behavior, not merely rewrite wording to chase a noisy
-  judge score.
+  judge score. Count candidate versions, not only valid decisions: once a materially distinct
+  candidate is tested, an invalid or contaminated evaluation does not refund that revision slot.
+  Never reset the bound without an explicit user override.
 - Distinguish lifecycle state before testing. For a new skill, keep the candidate out of permanent
   discovery until it passes and archive it only after the bounded serious attempts are exhausted.
   For a revision to an existing proven skill, preserve the last proven version and restore it if
@@ -112,8 +114,9 @@ usable when Skillforge is unavailable.
    result informed the revision, mark every exposed heldout and its judge packets retired; freeze
    genuinely new heldouts before the next gate. Never reuse exposed cases under new names. Repeat
    automatically until a candidate passes or the revision bound is exhausted. The default bound is
-   three serious candidate revisions total, including the initial candidate; a user-specified bound
-   replaces it. Stop early when the remaining signal is only inconsistent or noisy judge scoring.
+   three serious candidate versions total, including the initial candidate; each materially distinct
+   tested candidate consumes one slot even when its evaluation is later invalidated. A user-specified
+   bound replaces it. Stop early when the remaining signal is only inconsistent or noisy judge scoring.
 10. **Keep, restore, or archive.** Validate the complete attempt manifest with
     `scripts/lifecycle_gate.py`. On pass, leave the candidate active and rerun both clients' skill
     validation. When the bound is exhausted, archive a new skill under the repository's documented
