@@ -27,15 +27,14 @@ that skill. Run this workflow during skill creation, before declaring the skill 
   difference. Do not show its name, text, or purpose to the baseline runner.
 - Validate the exact candidate payload in both Claude Code and Codex discovery before execution.
   Version 3 requires both client records to resolve to the frozen treatment skill hash.
-- Use the current host's native subagent mechanism for runners and judges. Never launch `codex`,
-  `claude`, or another agent CLI from a shell, script, hook, or nested agent: recursive clients can
-  inherit the wrong configuration, multiply processes, exhaust quotas, and invalidate isolation.
-  The top-level host coordinator is the only component allowed to create evaluation agents. Skills,
-  scripts, runners, and judges must not create children; every runner and judge prompt must say not
-  to launch processes or subagents. Keep at most four evaluation agents active at once and use one
-  at a time when the host cannot report or enforce the active count. A host-native collaboration
-  agent is admissible even when the host UI labels its worker as Codex; a new CLI process or session
-  created by skill code is not.
+- Evaluation agents are supplied by the top-level host coordinator outside this skill's execution.
+  This skill, its scripts, hooks, runners, and judges never start another AI CLI, request a child
+  agent, or contain executable agent-launch plumbing. Accept only runners and judges created as
+  direct children by that coordinator through the host-native collaboration mechanism. Every runner
+  and judge prompt must say not to launch processes or subagents. Keep at most four evaluation agents
+  active at once and use one at a time when the host cannot report or enforce the active count. A
+  host-native collaboration agent is admissible even when the host UI labels its worker as Codex; a
+  new CLI process or session created by skill code is not.
 - Record structured native provenance for every runner and judge. Version 3 inputs must declare the
   fixed execution policy and matched condition manifest from `references/judge-contract.md`; each
   run and judgment must include a unique fresh host context and a retained native receipt. The
@@ -82,26 +81,25 @@ usable when Skillforge is unavailable.
    realistic inputs, expected qualities, weighted criteria, core criterion IDs, critical failures,
    deterministic graders where possible, and a minimum overall delta. Default to 5 normalized
    points. Structural validation is a prerequisite, not evidence that the skill helps.
-3. **Iterate on development cases.** Run no-skill baselines and candidate treatments in fresh,
-   matched contexts. Use multiple trials for stochastic behavior. Review complete transcripts,
-   tool use, artifacts, deterministic grader results, and final outcomes. Fix the skill using only
-   development evidence. Spawn these runs only through the host's native subagent tool, never by
-   invoking an AI CLI in a shell command or generated harness. The coordinator calls the host
-   collaboration API directly; never put agent-spawn instructions inside a skill, runner, judge,
-   script, hook, or generated artifact.
+3. **Iterate on development cases.** Accept no-skill baselines and candidate treatments from fresh,
+   matched contexts supplied by the top-level coordinator. Use multiple trials for stochastic
+   behavior. Review complete transcripts, tool use, artifacts, deterministic grader results, and
+   final outcomes. Fix the skill using only development evidence. Reject any run created by a skill,
+   runner, judge, script, hook, generated artifact, nested agent, or recursively invoked AI CLI.
 4. **Freeze fresh heldouts.** Write unseen heldout behavioral cases only after iteration stops. Do
    not tune against these cases. If routing is in scope, freeze separate positive and negative
    trigger tests too.
-5. **Run heldout trials.** Use the same model, tools, context, and trial count for baseline and
-   treatment. If isolation or parity is unavailable, stop and report that the comparison is not
-   controlled. Before preparing packets, inspect the host agent tree and process list, then retain
-   the native agent/context IDs in each run's provenance. Treat any `codex exec`, `claude -p`, or
-   equivalent nested client as contamination and replace every affected run.
+5. **Validate heldout trials.** Require the same model, tools, context, and trial count for baseline
+   and treatment. If the coordinator cannot supply isolated parity, stop and report that the
+   comparison is not controlled. Before preparing packets, inspect the host agent tree and process
+   list, then retain the native agent/context IDs in each run's provenance. A valid run has the
+   top-level coordinator as its direct parent. Treat any other ancestry as contamination. Never accept
+   a recursively invoked AI command-line client as an evaluation run.
 6. **Blind the comparisons.** Put verbatim transcripts and outcomes into a version 3 input for
    scripts/eval_gate.py prepare. It emits one packet per judge and counterbalances A/B position
    for every trial. Keep the key and full packet bundle away from judges; give each judge only its
    own entry under judge_packets.
-7. **Judge independently.** First require each fresh judge to pass the frozen calibration set. It then uses only its packet and the contract in
+7. **Validate independent judgments.** Require each coordinator-supplied fresh judge to pass the frozen calibration set. It then uses only its packet and the contract in
    references/judge-contract.md. It scores every criterion with an exact evidence quote from that
    run, chooses the winner implied by weighted scores (exact equality is a tie), and selects critical
    failures only from the frozen taxonomy. Collect all judge results into one v3 judgment file.
