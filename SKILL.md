@@ -44,7 +44,10 @@ that skill. Run this workflow during skill creation, before declaring the skill 
   self-attested boolean alone is not current admissible evidence.
 - Use multiple baseline and treatment trials whenever execution is stochastic. Use at least two
   independent judges and three or more for broad, costly, or safety-critical skills. Calibrate every
-  judge on frozen reference comparisons before accepting its scores.
+  judge on frozen reference comparisons before accepting its scores. Judges are repeated
+  measurements of a comparison, not independent task trials: average judges within each unique
+  baseline/treatment comparison, compute uncertainty across unique comparisons, and require at
+  least two unique heldout comparisons. Never use judge count as the uncertainty sample size.
 - Preserve failed runs and unknown measurements. Record verbatim transcripts and final outcomes;
   judges must inspect both. Never manufacture an output or score.
 - Give counterbalanced anonymous packets to fresh judge agents. The author and runners do not
@@ -107,7 +110,8 @@ usable when Skillforge is unavailable.
    regression, improve at least one core criterion, and have an empty union of heldout treatment
    critical failures across judges. Any heldout treatment deterministic-grader failure or heldout
    trigger mismatch, uncertainty failure, or efficiency regression also retires the candidate.
-   Never override a failure by editorial judgment.
+   Never override a failure by editorial judgment. For uncertainty, the valid unit is one unique
+   baseline/treatment comparison after averaging its judges, never one judge opinion.
 9. **Improve and retest after failure.** Diagnose the failure from deterministic checks,
    transcripts, outcomes, and judge evidence. First add or refine development cases that reproduce
    it, then make one serious candidate revision and rerun development trials. If the failed heldout
