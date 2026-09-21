@@ -201,7 +201,8 @@ def validate_metrics(value: object, field: str) -> None:
 
 
 def validate_run(run: object, field: str, *, version: int = 2, role: str | None = None,
-                 condition_hash: str | None = None, treatment_hash: str | None = None) -> None:
+                 condition_hash: str | None = None, baseline_hash: str | None = None,
+                 treatment_hash: str | None = None) -> None:
     if not isinstance(run, dict):
         raise Invalid(f"{field} must be an object")
     require_text(run.get("transcript"), f"{field}.transcript")
@@ -212,7 +213,7 @@ def validate_run(run: object, field: str, *, version: int = 2, role: str | None 
     if version >= 3:
         if provenance.get("condition_sha256") != condition_hash:
             raise Invalid(f"{field}.provenance.condition_sha256 does not match condition_manifest")
-        expected_skill_hash = treatment_hash if role == "treatment" else None
+        expected_skill_hash = treatment_hash if role == "treatment" else baseline_hash
         if provenance.get("skill_sha256") != expected_skill_hash:
             raise Invalid(f"{field}.provenance.skill_sha256 does not match {role} condition")
         validate_metrics(run.get("metrics"), f"{field}.metrics")
@@ -310,7 +311,7 @@ def validate_input_v2(data: dict) -> None:
     validate_trigger_tests(data)
 
 
-def validate_condition_manifest(data: dict) -> tuple[str, str]:
+def validate_condition_manifest(data: dict) -> tuple[str, str | None, str]:
     value = data.get("condition_manifest")
     if not isinstance(value, dict):
         raise Invalid("condition_manifest must be an object")
@@ -323,10 +324,17 @@ def validate_condition_manifest(data: dict) -> tuple[str, str]:
         require_text(value.get(field), f"condition_manifest.{field}")
     for field in required_hashes:
         require_sha256(value.get(field), f"condition_manifest.{field}")
-    if value.get("baseline_skill") != "absent":
-        raise Invalid("condition_manifest.baseline_skill must be absent")
+    baseline = value.get("baseline_skill")
+    baseline_hash = None
+    if baseline != "absent":
+        if not isinstance(baseline, dict) or baseline.get("mode") != "prior_version":
+            raise Invalid("condition_manifest.baseline_skill must be absent or a prior_version object")
+        baseline_hash = require_sha256(
+            baseline.get("sha256"), "condition_manifest.baseline_skill.sha256"
+        )
+        require_text(baseline.get("version"), "condition_manifest.baseline_skill.version")
     common = {key: item for key, item in value.items() if key not in ("baseline_skill", "treatment_skill_sha256")}
-    return digest(common), value["treatment_skill_sha256"]
+    return digest(common), baseline_hash, value["treatment_skill_sha256"]
 
 
 def validate_client_coverage(data: dict) -> None:
@@ -377,7 +385,7 @@ def validate_judge_calibration_config(data: dict) -> None:
 def validate_input_v3(data: dict) -> None:
     validate_common(data)
     validate_execution_policy(data)
-    condition_hash, treatment_hash = validate_condition_manifest(data)
+    condition_hash, baseline_hash, treatment_hash = validate_condition_manifest(data)
     validate_client_coverage(data)
     validate_judge_calibration_config(data)
     gate = data.get("gate", {})
@@ -400,7 +408,8 @@ def validate_input_v3(data: dict) -> None:
             for role in ("baseline", "treatment"):
                 validate_run(
                     trial[role], f"case {case['id']} trial {trial['id']} {role}", version=3,
-                    role=role, condition_hash=condition_hash, treatment_hash=treatment_hash,
+                    role=role, condition_hash=condition_hash, baseline_hash=baseline_hash,
+                    treatment_hash=treatment_hash,
                 )
 
 

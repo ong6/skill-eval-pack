@@ -349,6 +349,24 @@ class V3Tests(unittest.TestCase):
         with self.assertRaisesRegex(gate.Invalid, "exactly claude-code and codex"):
             gate.prepare(data, "seed")
 
+    def test_v3_supports_prior_version_baseline(self):
+        data = v3_input()
+        data["condition_manifest"]["baseline_skill"] = {
+            "mode": "prior_version", "version": "git:abc", "sha256": "8" * 64,
+        }
+        common = {
+            key: value for key, value in data["condition_manifest"].items()
+            if key not in ("baseline_skill", "treatment_skill_sha256")
+        }
+        condition_hash = gate.digest(common)
+        for case in data["cases"]:
+            for trial in case["trials"]:
+                trial["baseline"]["provenance"]["condition_sha256"] = condition_hash
+                trial["baseline"]["provenance"]["skill_sha256"] = "8" * 64
+                trial["treatment"]["provenance"]["condition_sha256"] = condition_hash
+        packet, _ = gate.prepare(data, "seed")
+        self.assertEqual(3, packet["version"])
+
     def test_v3_requires_two_heldout_comparisons(self):
         data = v3_input()
         data["cases"][1]["split"] = "development"

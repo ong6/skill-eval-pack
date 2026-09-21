@@ -26,6 +26,10 @@ baseline skill is absent and treatment declares the candidate hash:
       "treatment_skill_sha256": "64 lowercase hex characters"
     }
 
+For a material revision of an already proven skill, baseline_skill may instead be a prior_version
+object containing mode, version, and sha256. Baseline run provenance then carries that hash. This
+preserves a known-good version rather than pretending a revision is a brand-new skill.
+
 Every input also records installation validation for both clients. Both hashes must equal the frozen
 treatment_skill_sha256; structural validation is a prerequisite, not evidence of behavioral value:
 
