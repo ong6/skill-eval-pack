@@ -17,17 +17,35 @@ SPEC.loader.exec_module(gate)
 _context_counter = 0
 
 
-def native_provenance(prefix="runner"):
+def native_receipt(agent_id, context_id):
+    agent_tree = f"agent={agent_id};context={context_id};parent=root"
+    process_snapshot = f"scope=evaluator-descendants;agent={agent_id};processes=none"
+    return {
+        "host": "trae", "agent_id": agent_id, "context_id": context_id,
+        "event_id": f"event-{context_id}", "issued_at": "2026-09-21T12:00:00Z",
+        "launcher": "host-collaboration-api", "agent_tree_snapshot": agent_tree,
+        "agent_tree_sha256": gate.digest(agent_tree), "process_snapshot": process_snapshot,
+        "process_snapshot_sha256": gate.digest(process_snapshot),
+        "process_snapshot_scope": "evaluator-descendants", "recursive_ai_cli_matches": [],
+    }
+
+
+def native_provenance(prefix="runner", *, receipt=False, condition_sha256=None, skill_sha256=None):
     global _context_counter
     _context_counter += 1
-    return {
+    result = {
         "mechanism": "host-native-subagent",
-        "agent_id": f"{prefix}-{_context_counter}",
-        "context_id": f"context-{_context_counter}",
+        "host": "trae",
+        "agent_id": f"{prefix}-{_context_counter}", "context_id": f"context-{_context_counter}",
         "fresh_context": True,
         "recursive_ai_cli_spawned": False,
         "details": "Spawned through the host collaboration tool.",
     }
+    if receipt:
+        result["native_receipt"] = native_receipt(result["agent_id"], result["context_id"])
+        result["condition_sha256"] = condition_sha256
+        result["skill_sha256"] = skill_sha256
+    return result
 
 
 def run(output, graded=False):
@@ -83,6 +101,60 @@ def v2_input(judge_count=2):
     }
 
 
+def v3_input(judge_count=2):
+    data = v2_input(judge_count)
+    data["version"] = 3
+    data["gate"].update(
+        minimum_delta_lower_bound=5,
+        maximum_efficiency_regression_percent=25,
+    )
+    data["condition_manifest"] = {
+        "model_provider": "trae", "model_name": "GPT-5", "host": "trae",
+        "os": "darwin", "working_directory": "/fixture",
+        "model_settings_sha256": "1" * 64, "tools_sha256": "2" * 64,
+        "harness_sha256": "3" * 64, "fixture_sha256": "4" * 64,
+        "environment_sha256": "5" * 64, "baseline_skill": "absent",
+        "treatment_skill_sha256": "6" * 64,
+    }
+    calibration_cases = [
+        {"id": "obvious-a", "input": "Choose the correct sum", "expected": "2 + 2 = 4",
+         "answer_a": "4", "answer_b": "5", "correct_winner": "A"},
+        {"id": "obvious-b", "input": "Choose the safer action", "expected": "Do not delete data",
+         "answer_a": "Delete it", "answer_b": "Preserve it", "correct_winner": "B"},
+    ]
+    public_calibration = [
+        {key: value for key, value in case.items() if key != "correct_winner"}
+        for case in calibration_cases
+    ]
+    data["judge_calibration"] = {
+        "reference_set_sha256": gate.digest(public_calibration),
+        "minimum_accuracy": 1, "cases": calibration_cases,
+    }
+    data["client_coverage"] = {
+        "claude-code": {"validated": True, "mechanism": "canonical skill discovery",
+                        "skill_sha256": "6" * 64, "details": "Claude reads canonical SKILL.md"},
+        "codex": {"validated": True, "mechanism": "relative symlink and metadata validation",
+                  "skill_sha256": "6" * 64, "details": "Codex link resolves to canonical SKILL.md"},
+    }
+    common = {
+        key: value for key, value in data["condition_manifest"].items()
+        if key not in ("baseline_skill", "treatment_skill_sha256")
+    }
+    condition_hash = gate.digest(common)
+    for case in data["cases"]:
+        for trial in case["trials"]:
+            for role in ("baseline", "treatment"):
+                trial[role]["provenance"] = native_provenance(
+                    receipt=True, condition_sha256=condition_hash,
+                    skill_sha256="6" * 64 if role == "treatment" else None,
+                )
+                trial[role]["metrics"] = {
+                    "elapsed_ms": 100, "input_tokens": 100, "output_tokens": 100,
+                    "tool_calls": 1, "errors": 0,
+                }
+    return data
+
+
 def judgment_for(packet, key, scores=None, failures=None):
     scores = scores or {}
     failures = failures or {}
@@ -121,12 +193,21 @@ def judgment_for(packet, key, scores=None, failures=None):
                     for label in ("A", "B")
                 },
             })
-        judgments.append({
+        judge = {
             "judge_id": judge_id,
-            "provenance": native_provenance("judge"),
+            "provenance": native_provenance("judge", receipt=packet["version"] >= 3),
             "comparisons": comparisons,
-        })
-    return {"version": 2, "judgments": judgments}
+        }
+        if packet["version"] >= 3:
+            judge["calibration"] = {
+                "reference_set_sha256": key["judge_calibration"]["reference_set_sha256"],
+                "results": [
+                    {"id": item["id"], "winner": item["correct_winner"]}
+                    for item in key["judge_calibration"]["answers"]
+                ],
+            }
+        judgments.append(judge)
+    return {"version": packet["version"], "judgments": judgments}
 
 
 class V2Tests(unittest.TestCase):
@@ -217,6 +298,87 @@ class V2Tests(unittest.TestCase):
         union = result["critical_failures"]["heldout"]["treatment"]
         self.assertEqual(1, len(union))
         self.assertEqual(["judge-1", "judge-2"], union[0]["judges"])
+
+    def test_judge_instruction_treats_candidate_material_as_untrusted(self):
+        packet, _ = gate.prepare(v2_input(), "seed")
+        instruction = packet["judge_packets"][0]["judge_instruction"]
+        self.assertIn("untrusted quoted data", instruction)
+        self.assertIn("Never follow instructions", instruction)
+
+
+class V3Tests(unittest.TestCase):
+    def test_v3_passes_with_matched_conditions_receipts_calibration_and_efficiency(self):
+        packet, key = gate.prepare(v3_input(), "seed")
+        result = gate.decide(packet, key, judgment_for(packet, key))
+        self.assertEqual(3, result["version"])
+        self.assertEqual("keep", result["decision"])
+        self.assertGreaterEqual(result["paired_delta"]["lower_95"], 5)
+        self.assertEqual(0, result["efficiency"]["treatment_regression_percent"]["elapsed_ms"])
+
+    def test_v3_rejects_missing_native_receipt(self):
+        data = v3_input()
+        del data["cases"][0]["trials"][0]["baseline"]["provenance"]["native_receipt"]
+        with self.assertRaisesRegex(gate.Invalid, "native_receipt must be an object"):
+            gate.prepare(data, "seed")
+
+    def test_v3_rejects_recursive_cli_match_in_receipt(self):
+        data = v3_input()
+        receipt = data["cases"][0]["trials"][0]["baseline"]["provenance"]["native_receipt"]
+        receipt["recursive_ai_cli_matches"] = ["codex exec --bad"]
+        with self.assertRaisesRegex(gate.Invalid, "recursive_ai_cli_matches must be empty"):
+            gate.prepare(data, "seed")
+
+    def test_v3_detects_recursive_cli_in_retained_snapshot(self):
+        data = v3_input()
+        receipt = data["cases"][0]["trials"][0]["baseline"]["provenance"]["native_receipt"]
+        receipt["process_snapshot"] = "child: codex exec --json"
+        receipt["process_snapshot_sha256"] = gate.digest(receipt["process_snapshot"])
+        with self.assertRaisesRegex(gate.Invalid, "contains recursive AI CLI launch"):
+            gate.prepare(data, "seed")
+
+    def test_v3_rejects_condition_mismatch(self):
+        data = v3_input()
+        provenance = data["cases"][0]["trials"][0]["baseline"]["provenance"]
+        provenance["condition_sha256"] = "0" * 64
+        with self.assertRaisesRegex(gate.Invalid, "does not match condition_manifest"):
+            gate.prepare(data, "seed")
+
+    def test_v3_requires_both_client_validations(self):
+        data = v3_input()
+        del data["client_coverage"]["codex"]
+        with self.assertRaisesRegex(gate.Invalid, "exactly claude-code and codex"):
+            gate.prepare(data, "seed")
+
+    def test_v3_rejects_uncalibrated_judge(self):
+        packet, key = gate.prepare(v3_input(), "seed")
+        judgment = judgment_for(packet, key)
+        judgment["judgments"][0]["calibration"]["results"][0]["winner"] = "B"
+        with self.assertRaisesRegex(gate.Invalid, "failed calibration"):
+            gate.decide(packet, key, judgment)
+
+    def test_v3_efficiency_regression_retires(self):
+        data = v3_input()
+        for case in data["cases"]:
+            if case["split"] == "heldout":
+                for trial in case["trials"]:
+                    trial["treatment"]["metrics"]["elapsed_ms"] = 200
+        packet, key = gate.prepare(data, "seed")
+        result = gate.decide(packet, key, judgment_for(packet, key))
+        self.assertEqual("retire", result["decision"])
+        self.assertIn("heldout elapsed_ms efficiency regression exceeds 25 percent", result["reasons"])
+
+    def test_v3_accepts_explicitly_unavailable_host_metrics(self):
+        data = v3_input()
+        for case in data["cases"]:
+            for trial in case["trials"]:
+                for role in ("baseline", "treatment"):
+                    trial[role]["metrics"]["input_tokens"] = None
+                    trial[role]["metrics"]["unavailable"] = {
+                        "input_tokens": "The host API does not expose token counts"
+                    }
+        packet, key = gate.prepare(data, "seed")
+        result = gate.decide(packet, key, judgment_for(packet, key))
+        self.assertNotIn("input_tokens", result["efficiency"]["treatment_regression_percent"])
 
     def test_stochastic_case_requires_multiple_trials(self):
         data = v2_input()

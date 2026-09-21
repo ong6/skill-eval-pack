@@ -45,6 +45,17 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("host's native subagent tool", self.skill_flat)
         self.assertIn("helper rejects missing, reused, non-native, or recursive-CLI provenance", self.skill_flat)
 
+    def test_v3_requires_receipts_parity_calibration_and_injection_defense(self):
+        self.assertIn("A self-attested boolean alone is not current admissible evidence", self.skill_flat)
+        self.assertIn("matched condition manifest", self.skill)
+        self.assertIn("Calibrate every judge", self.skill_flat)
+        self.assertIn("untrusted quoted data", self.skill)
+        self.assertIn("minimum_delta_lower_bound", self.contract)
+
+    def test_lifecycle_and_payload_helpers_are_documented(self):
+        self.assertIn("scripts/lifecycle_gate.py", self.skill)
+        self.assertIn("scripts/check_payload.py", self.skill)
+
 
 if __name__ == "__main__":
     unittest.main()

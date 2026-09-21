@@ -7,9 +7,9 @@ applies a machine-checked keep-or-retire gate.
 
 It complements Skillforge (https://github.com/ong6/skillforge): Skillforge stores rigorous frozen
 evaluation bundles and baseline deltas; this pack makes evaluation a required part of skill creation
-and supplies the blind judging and lifecycle decision. It never calls a model itself. Version 2
-also requires structured proof that runners and judges came from fresh host-native subagents;
-recursive `codex exec`, `claude -p`, and equivalent nested client runs are rejected.
+and supplies the blind judging and lifecycle decision. It never calls a model itself. Version 3
+requires matched-condition hashes, retained host-native receipts, judge calibration, efficiency
+metrics, and uncertainty-aware gates. Recursive Claude/Codex CLI runs are rejected.
 
 ## Install
 
@@ -30,7 +30,9 @@ model runs during PostToolUse or Stop would be expensive, context-poor, and hard
     python3 -m unittest discover -s tests -p 'test_*.py' -v
     bash tests/test_install.sh
 
-scripts/eval_gate.py uses only the Python standard library. Version 2 gates on heldout cases only,
+scripts/eval_gate.py uses only the Python standard library. Version 3 gates on heldout cases only,
 requires at least two judges, verifies quoted evidence and winner arithmetic, unions critical
-failures, and can veto a candidate on deterministic or trigger failures. Version 1 bundles remain
-compatible. Private prompts and outputs stay wherever the host stores the evaluation files.
+failures, and can veto a candidate on deterministic, trigger, uncertainty, provenance, calibration,
+or efficiency failures. `scripts/lifecycle_gate.py` validates the bounded revision and terminal
+action record. `scripts/check_payload.py` detects drift between this repository and an installation.
+Versions 1 and 2 remain compatible. Private prompts and outputs stay in the host repository.

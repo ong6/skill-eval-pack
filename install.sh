@@ -26,13 +26,22 @@ if [ -e "$target" ] || [ -L "$target" ]; then
   rm -rf -- "$target"
 fi
 mkdir -p "$target/agents" "$target/references" "$target/scripts" "$target/tests" "$repo/.agents/skills"
-cp "$source_dir/SKILL.md" "$target/SKILL.md"
-cp "$source_dir/agents/openai.yaml" "$target/agents/openai.yaml"
-cp "$source_dir/references/judge-contract.md" "$target/references/judge-contract.md"
-cp "$source_dir/scripts/eval_gate.py" "$target/scripts/eval_gate.py"
-cp "$source_dir/tests/test_eval_gate.py" "$target/tests/test_eval_gate.py"
-cp "$source_dir/tests/test_workflow_contract.py" "$target/tests/test_workflow_contract.py"
-chmod +x "$target/scripts/eval_gate.py"
+for relative in \
+  SKILL.md \
+  agents/openai.yaml \
+  references/judge-contract.md \
+  references/research.md \
+  scripts/eval_gate.py \
+  scripts/lifecycle_gate.py \
+  scripts/check_payload.py \
+  tests/test_eval_gate.py \
+  tests/test_lifecycle_gate.py \
+  tests/test_payload.py \
+  tests/test_workflow_contract.py
+do
+  cp "$source_dir/$relative" "$target/$relative"
+done
+chmod +x "$target/scripts/eval_gate.py" "$target/scripts/lifecycle_gate.py" "$target/scripts/check_payload.py"
 
 if [ -x "$repo/.agents/sync-skills.sh" ]; then
   (cd "$repo" && bash .agents/sync-skills.sh)
