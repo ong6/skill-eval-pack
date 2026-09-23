@@ -1,7 +1,7 @@
 interface:
-  display_name: "Skill Eval Pack"
-  short_description: "A/B test a skill before keeping it"
-  default_prompt: "Use $skill-eval-pack to compare this skill against a no-skill baseline and keep it only if the blinded evaluation passes."
+  display_name: "Skillsmith"
+  short_description: "Make a skill from your repo, then prove it beats no skill"
+  default_prompt: "Use $skillsmith to make this skill from what the repo needs, then keep it only if it beats a no-skill baseline in a blinded evaluation."
 
 policy:
   allow_implicit_invocation: true

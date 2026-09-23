@@ -17,8 +17,8 @@ case "$1" in /*) ;; *) printf 'repository path must be absolute\n' >&2; exit 2 ;
 
 repo=${1%/}
 source_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-target="$repo/.claude/skills/skill-eval-pack"
-codex_link="$repo/.agents/skills/skill-eval-pack"
+target="$repo/.claude/skills/skillsmith"
+codex_link="$repo/.agents/skills/skillsmith"
 [ -d "$repo" ] || { printf 'repository does not exist: %s\n' "$repo" >&2; exit 2; }
 
 if [ -e "$target" ] || [ -L "$target" ]; then
@@ -29,19 +29,23 @@ mkdir -p "$target/agents" "$target/references" "$target/scripts" "$target/tests"
 for relative in \
   SKILL.md \
   agents/openai.yaml \
+  references/authoring.md \
   references/judge-contract.md \
   references/research.md \
   scripts/eval_gate.py \
   scripts/lifecycle_gate.py \
   scripts/check_payload.py \
+  scripts/inventory.py \
+  scripts/lint_skill.py \
   tests/test_eval_gate.py \
+  tests/test_authoring.py \
   tests/test_lifecycle_gate.py \
   tests/test_payload.py \
   tests/test_workflow_contract.py
 do
   cp "$source_dir/$relative" "$target/$relative"
 done
-chmod +x "$target/scripts/eval_gate.py" "$target/scripts/lifecycle_gate.py" "$target/scripts/check_payload.py"
+chmod +x "$target"/scripts/*.py
 
 if [ -x "$repo/.agents/sync-skills.sh" ]; then
   (cd "$repo" && bash .agents/sync-skills.sh)
@@ -50,7 +54,7 @@ else
     [ "$force" -eq 1 ] || { printf 'Codex target exists: %s\n' "$codex_link" >&2; exit 2; }
     rm -rf -- "$codex_link"
   fi
-  ln -s ../../.claude/skills/skill-eval-pack "$codex_link"
+  ln -s ../../.claude/skills/skillsmith "$codex_link"
 fi
 
 printf 'installed Claude skill: %s\n' "$target"

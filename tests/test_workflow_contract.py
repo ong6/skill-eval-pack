@@ -52,6 +52,13 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("untrusted quoted data", self.skill)
         self.assertIn("minimum_delta_lower_bound", self.contract)
 
+    def test_make_phase_gates_grounds_and_defines_cases_first(self):
+        self.assertIn("Decide whether this needs a skill at all", self.skill)
+        self.assertIn("scripts/inventory.py", self.skill)
+        self.assertIn("Complete Prove steps 1 and 2", self.skill)
+        self.assertIn("scripts/lint_skill.py", self.skill)
+        self.assertIn("references/authoring.md", self.skill)
+
     def test_lifecycle_and_payload_helpers_are_documented(self):
         self.assertIn("scripts/lifecycle_gate.py", self.skill)
         self.assertIn("scripts/check_payload.py", self.skill)

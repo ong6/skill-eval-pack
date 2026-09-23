@@ -1,6 +1,6 @@
 # Evaluation design references
 
-Retrieved 2026-09-21. These sources informed the pack's contract; they are not runtime dependencies.
+Retrieved 2026-09-21. These sources informed Skillsmith's contract; they are not runtime dependencies.
 
 - [Anthropic: Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents)
   supports realistic tasks, multiple trials for stochastic agents, outcome and transcript inspection,
@@ -22,7 +22,7 @@ Retrieved 2026-09-21. These sources informed the pack's contract; they are not r
 - [OpenAI Evals](https://github.com/openai/evals) provides public examples and an evaluation
   registry for reproducible task, data, and scoring definitions.
 
-Skill Eval Pack adds requirements that matter specifically for local Claude/Codex skills:
+Skillsmith adds requirements that matter specifically for local Claude/Codex skills:
 
 - The candidate skill must be the only intended baseline/treatment difference.
 - No evaluation component may invoke a nested AI CLI. The host creates runners and judges through

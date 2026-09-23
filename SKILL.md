@@ -1,18 +1,40 @@
 ---
-name: skill-eval-pack
+name: skillsmith
 description: >-
-  Evaluate a newly created or materially revised agent skill against a no-skill
-  baseline, then keep or retire it based on blinded independent-agent judgment.
-  Use whenever asked to add, create, revise, install, or prove a skill for Claude
-  Code or Codex; not for typo-only edits or ordinary prompts that do not change a skill.
+  Make an agent skill grounded in the current repository, then prove it beats the
+  same model without it: gate whether a skill is the right mechanism, inventory
+  existing skills and conventions, draft and lint, run a blinded baseline-versus-skill
+  evaluation, and keep or retire. Use whenever asked to add, create, write, revise,
+  install, review, or prove a skill for Claude Code or Codex; not for typo-only
+  edits, AGENTS.md rules, hooks, or prompts that do not change a skill.
 ---
 
-# Skill Eval Pack
+# Skillsmith
 
-No new skill earns permanent prompt space without beating the same model on the same task without
-that skill. Run this workflow during skill creation, before declaring the skill installed.
+No skill earns permanent prompt space without beating the same model on the same task without it.
+Make the skill from what the repository actually needs, then prove it before declaring it installed.
 
-## Contract
+## Make
+
+1. **Gate.** Decide whether this needs a skill at all. An always-apply rule, a hook, a memory, a
+   one-off task, or an extension of an existing skill is usually the better home. Push back when
+   it is.
+2. **Ground.** Run `scripts/inventory.py --repo <repo> --query "<job>" --global`, read the repo's
+   agent manuals and the closest existing skills, and follow the repo's own skill conventions.
+   Extend an overlapping skill instead of adding a rival.
+3. **Define before drafting.** Complete Prove steps 1 and 2 (behavioral claim, frozen development
+   cases and rubric) before writing the candidate, so the cases measure the need rather than the
+   draft.
+4. **Draft and lint.** Write a trigger-first description and the smallest body that closes the
+   observed gap, then run `scripts/lint_skill.py <skill-dir>` until it passes. Keep the candidate
+   out of permanent discovery until Prove keeps it.
+
+Authoring rules, the gate table, and maintenance checks are in
+[references/authoring.md](references/authoring.md).
+
+## Prove
+
+### Contract
 
 - Freeze the task, model, tools, context, rubric, critical failures, and keep threshold before
   seeing treatment output.
@@ -67,12 +89,7 @@ that skill. Run this workflow during skill creation, before declaring the skill 
   For a revision to an existing proven skill, preserve the last proven version and restore it if
   the revised candidate exhausts the bound without passing.
 
-Use Skillforge (https://github.com/ong6/skillforge) when available to freeze and retain the full
-evaluation bundle. It owns model/case/version provenance and baseline deltas. This pack owns the
-creation-time orchestration, blind judging, and keep-or-retire decision. The local helper remains
-usable when Skillforge is unavailable.
-
-## Procedure
+### Procedure
 
 1. **Define the behavioral claim.** State what the proposed skill should improve, what must not
    regress, and when the skill should and should not trigger. If these cannot be observed, do not
@@ -132,7 +149,15 @@ usable when Skillforge is unavailable.
 
 ## Helpers
 
-Version 3 is the default for new evaluations. Versions 1 and 2 remain accepted for existing bundles.
+All helpers use only the Python standard library and never call a model.
+
+    python3 scripts/inventory.py --repo /absolute/repo --query "what the skill should do" --global
+    python3 scripts/lint_skill.py /absolute/repo/.claude/skills/new-skill
+
+The inventory ranks existing skills by overlap with the proposed job; the linter blocks on
+frontmatter, size, and broken-link errors and warns on weak triggers.
+
+Evaluation version 3 is the default for new evaluations. Versions 1 and 2 remain accepted for existing bundles.
 
     python3 scripts/eval_gate.py prepare \
       --input evaluation-input.json \
@@ -157,12 +182,16 @@ transcripts, and outputs; keep them out of public repositories unless reviewed.
 
 Before installing or declaring parity, verify the installed payload against the public checkout:
 
-    python3 scripts/check_payload.py --installed /absolute/repo/.claude/skills/skill-eval-pack
+    python3 scripts/check_payload.py --installed /absolute/repo/.claude/skills/skillsmith
 
 ## Failure patterns
 
 | Bad | Required |
 |---|---|
+| Write a skill for an always-apply rule or a one-off task | Put the rule in the agent manual, or just do the task |
+| Add a skill that overlaps one the repo already has | Run the inventory and extend the existing skill |
+| Draft first, then write cases the draft happens to pass | Freeze the claim and development cases before drafting |
+| Describe what the skill is | Describe the requests that should and should not trigger it |
 | Tune on the cases used for the final decision | Iterate on development cases, then freeze fresh heldouts |
 | Ask one agent to remember how it would answer without the skill | Use separate fresh baseline and treatment contexts |
 | Let a run claim it was native with no receipt | Retain the host receipt plus hashed agent-tree and process snapshots |

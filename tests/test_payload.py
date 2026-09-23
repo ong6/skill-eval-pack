@@ -15,7 +15,7 @@ SPEC.loader.exec_module(check)
 class PayloadTests(unittest.TestCase):
     def test_matching_payload_passes_and_drift_fails(self):
         with tempfile.TemporaryDirectory() as directory:
-            installed = Path(directory) / "skill-eval-pack"
+            installed = Path(directory) / "skillsmith"
             for relative in check.PAYLOAD:
                 target = installed / relative
                 target.parent.mkdir(parents=True, exist_ok=True)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify that an installed Skill Eval Pack matches this checkout."""
+"""Verify that an installed Skillsmith install matches this checkout."""
 
 from __future__ import annotations
 
@@ -12,12 +12,16 @@ import sys
 PAYLOAD = (
     "SKILL.md",
     "agents/openai.yaml",
+    "references/authoring.md",
     "references/judge-contract.md",
     "references/research.md",
     "scripts/eval_gate.py",
     "scripts/lifecycle_gate.py",
     "scripts/check_payload.py",
+    "scripts/inventory.py",
+    "scripts/lint_skill.py",
     "tests/test_eval_gate.py",
+    "tests/test_authoring.py",
     "tests/test_lifecycle_gate.py",
     "tests/test_payload.py",
     "tests/test_workflow_contract.py",
