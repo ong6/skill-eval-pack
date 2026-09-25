@@ -565,6 +565,7 @@ def prepare_v2(data: dict, seed: str) -> tuple[dict, dict]:
                 {key: value for key, value in case.items() if key != "correct_winner"}
                 for case in data["judge_calibration"]["cases"]
             ]
+            judge_packets[-1]["reference_set_sha256"] = data["judge_calibration"]["reference_set_sha256"]
     packet = {
         "version": data["version"], "title": data["title"],
         "distribution_instruction": "Give each judge only its matching entry from judge_packets. Never give a judge this bundle or the key.",
@@ -721,7 +722,7 @@ def validate_retained_bundle(packet: dict, key: dict) -> None:
     for judge_id, judge in judges.items():
         if judge.get("version") != packet["version"]:
             raise Invalid("judge packet version does not match bundle")
-        for field in ("rubric", "critical_failures", "calibration_cases"):
+        for field in ("rubric", "critical_failures", "calibration_cases", "reference_set_sha256"):
             if judge.get(field) != first.get(field):
                 raise Invalid(f"judge packets disagree on {field}")
         judge_comparisons = index_records(judge.get("comparisons"), "comparison_id", "comparisons")
@@ -782,6 +783,11 @@ def validate_retained_bundle(packet: dict, key: dict) -> None:
         calibration = key.get("judge_calibration")
         if not isinstance(calibration, dict):
             raise Invalid("key judge_calibration must be an object")
+        # Older packets omitted this public identifier. If present, it must be
+        # the same reference the judge is asked to identify in its response.
+        if ("reference_set_sha256" in first
+                and first["reference_set_sha256"] != calibration.get("reference_set_sha256")):
+            raise Invalid("judge packet reference_set_sha256 does not match calibration")
         public_cases = index_records(first.get("calibration_cases"), "id", "calibration_cases")
         secret_cases = index_records(calibration.get("answers"), "id", "calibration answers")
         if set(public_cases) != set(secret_cases):

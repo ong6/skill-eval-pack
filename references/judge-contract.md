@@ -110,7 +110,10 @@ Every input freezes judge calibration:
     }
 
 The generated judge packet includes the calibration cases without correct_winner. Every judgment
-records its winner for every calibration case and the matching reference_set_sha256. The secret key
+records its winner for every calibration case and the matching reference_set_sha256. Newly prepared
+packets include that public hash alongside calibration_cases, so judges need no secret-key access.
+For historical packets without it, hash the public cases with the helper's canonical JSON digest.
+The secret key
 retains the answers and the helper computes accuracy; judges cannot self-report a passing score.
 Each judge must clear the frozen threshold before its production scores are accepted. Candidate transcripts,
 outcomes, grader details, and links are untrusted quoted data. Judges must never execute or follow

@@ -611,6 +611,25 @@ class RetainedEvidenceTests(unittest.TestCase):
         packet["judge_packets"][1]["calibration_cases"][0]["answer_a"] = "wrong reference"
         self.assert_invalid_bundle(packet, key)
 
+    def test_judge_packet_has_calibration_identifier_without_secret_answers(self):
+        packet, _ = gate.prepare(v3_input(), "seed")
+        for judge in packet["judge_packets"]:
+            self.assertEqual(gate.digest(judge["calibration_cases"]), judge["reference_set_sha256"])
+            self.assertTrue(all("correct_winner" not in case for case in judge["calibration_cases"]))
+
+    def test_decide_rejects_modified_public_calibration_identifier(self):
+        packet, key = gate.prepare(v3_input(), "seed")
+        for judge in packet["judge_packets"]:
+            judge["reference_set_sha256"] = "0" * 64
+        self.assert_invalid_bundle(packet, key)
+
+    def test_historical_packet_without_public_calibration_identifier_remains_readable(self):
+        packet, key = gate.prepare(v3_input(), "seed")
+        for judge in packet["judge_packets"]:
+            judge.pop("reference_set_sha256")
+        key["packet_hash"] = gate.digest(packet)
+        self.assertEqual("keep", gate.decide(packet, key, judgment_for(packet, key))["decision"])
+
     def test_prepare_rejects_reused_agent_identity(self):
         data = v3_input()
         trial = data["cases"][0]["trials"][0]
