@@ -21,12 +21,14 @@ target="$repo/.claude/skills/skillsmith"
 codex_link="$repo/.agents/skills/skillsmith"
 [ -d "$repo" ] || { printf 'repository does not exist: %s\n' "$repo" >&2; exit 2; }
 
+# Check both destinations and the complete source before touching an installation.
 if [ -e "$target" ] || [ -L "$target" ]; then
   [ "$force" -eq 1 ] || { printf 'target exists; inspect it or rerun with --force: %s\n' "$target" >&2; exit 2; }
-  rm -rf -- "$target"
 fi
-mkdir -p "$target/agents" "$target/references" "$target/scripts" "$target/tests" "$repo/.agents/skills"
-for relative in \
+if [ -e "$codex_link" ] || [ -L "$codex_link" ]; then
+  [ "$force" -eq 1 ] || { printf 'Codex target exists: %s\n' "$codex_link" >&2; exit 2; }
+fi
+payload=(
   SKILL.md \
   agents/openai.yaml \
   references/authoring.md \
@@ -42,20 +44,77 @@ for relative in \
   tests/test_lifecycle_gate.py \
   tests/test_payload.py \
   tests/test_workflow_contract.py
-do
-  cp "$source_dir/$relative" "$target/$relative"
+)
+for relative in "${payload[@]}"; do
+  [ -f "$source_dir/$relative" ] || { printf 'source missing: %s\n' "$relative" >&2; exit 2; }
 done
-chmod +x "$target"/scripts/*.py
+mkdir -p "$repo/.claude/skills" "$repo/.agents/skills"
+lock="$repo/.claude/skills/.skillsmith-install.lock"
+mkdir "$lock" 2>/dev/null || { printf 'installation already in progress: %s\n' "$lock" >&2; exit 2; }
+stage=''
+target_installed=0
+link_managed=0
+success=0
+cleanup() {
+  result=$?
+  trap - EXIT
+  trap '' HUP INT TERM
+  if [ "$success" -eq 0 ]; then
+    # Retain the backup if restoration fails; never discard the prior install.
+    if [ "$link_managed" -eq 1 ]; then rm -rf -- "$codex_link" || exit 1; fi
+    if [ "$target_installed" -eq 1 ]; then rm -rf -- "$target" || exit 1; fi
+    # Inspect the filesystem: a signal can arrive after mv succeeds but before
+    # the shell executes its next assignment.
+    if [ -n "$stage" ] && { [ -e "$stage/previous" ] || [ -L "$stage/previous" ]; }; then
+      mv "$stage/previous" "$target" || exit 1
+    fi
+    if [ -n "$stage" ] && { [ -e "$stage/previous-link" ] || [ -L "$stage/previous-link" ]; }; then
+      mv "$stage/previous-link" "$codex_link" || exit 1
+    fi
+  fi
+  [ -z "$stage" ] || rm -rf -- "$stage"
+  rmdir "$lock"
+  exit "$result"
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+# Another installer may have completed between preflight and acquiring the lock.
+if [ "$force" -eq 0 ] && { [ -e "$target" ] || [ -L "$target" ] || [ -e "$codex_link" ] || [ -L "$codex_link" ]; }; then
+  printf 'installation appeared during preflight; refusing to overwrite\n' >&2
+  exit 2
+fi
+stage=$(mktemp -d "$repo/.claude/skills/.skillsmith-stage.XXXXXX")
+mkdir -p "$stage/candidate/agents" "$stage/candidate/references" "$stage/candidate/scripts" "$stage/candidate/tests"
+for relative in "${payload[@]}"; do
+  cp "$source_dir/$relative" "$stage/candidate/$relative"
+done
+chmod +x "$stage/candidate"/scripts/*.py
+python3 "$source_dir/scripts/check_payload.py" --source "$source_dir" --installed "$stage/candidate" >/dev/null
+
+if [ -e "$target" ] || [ -L "$target" ]; then
+  mv "$target" "$stage/previous"
+fi
+if [ -e "$codex_link" ] || [ -L "$codex_link" ]; then
+  mv "$codex_link" "$stage/previous-link"
+fi
+target_installed=1
+mv "$stage/candidate" "$target"
+link_managed=1
 
 if [ -x "$repo/.agents/sync-skills.sh" ]; then
   (cd "$repo" && bash .agents/sync-skills.sh)
 else
-  if [ -e "$codex_link" ] || [ -L "$codex_link" ]; then
-    [ "$force" -eq 1 ] || { printf 'Codex target exists: %s\n' "$codex_link" >&2; exit 2; }
-    rm -rf -- "$codex_link"
-  fi
   ln -s ../../.claude/skills/skillsmith "$codex_link"
 fi
+# A successful validator must actually expose the canonical payload.
+python3 - "$target" "$codex_link" <<'PY'
+from pathlib import Path
+import sys
+target, link = map(Path, sys.argv[1:])
+if not link.is_symlink() or link.resolve() != target.resolve():
+    raise SystemExit("Codex discovery does not resolve to the installed skill")
+PY
+success=1
 
 printf 'installed Claude skill: %s\n' "$target"
 printf 'installed Codex link: %s\n' "$codex_link"
