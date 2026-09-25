@@ -1,3 +1,4 @@
+import copy
 import importlib.util
 import json
 from pathlib import Path
@@ -545,6 +546,208 @@ class V3Tests(unittest.TestCase):
             self.assertEqual(2, result.returncode)
             self.assertIn("refusing to overwrite", result.stderr)
             self.assertEqual("sentinel", output_path.read_text(encoding="utf-8"))
+
+
+class RetainedEvidenceTests(unittest.TestCase):
+    """Synthetic adversarial fixtures exercise validation, not skill efficacy."""
+
+    def assert_invalid_bundle(self, packet, key):
+        key["packet_hash"] = gate.digest(packet)
+        with self.assertRaises(gate.Invalid):
+            gate.decide(packet, key, judgment_for(packet, key))
+
+    def test_decide_revalidates_runner_condition_and_skill_hashes(self):
+        for field in ("condition_sha256", "skill_sha256"):
+            with self.subTest(field=field):
+                packet, key = gate.prepare(v3_input(), "seed")
+                key["runner_provenance"][0]["treatment"].pop(field)
+                self.assert_invalid_bundle(packet, key)
+
+    def test_decide_rejects_duplicate_metrics_instead_of_choosing_last(self):
+        packet, key = gate.prepare(v3_input(), "seed")
+        duplicate = copy.deepcopy(key["run_metrics"][1])
+        duplicate["treatment"]["elapsed_ms"] = 100000
+        key["run_metrics"].insert(0, duplicate)
+        self.assert_invalid_bundle(packet, key)
+
+    def test_decide_revalidates_finite_gate_thresholds(self):
+        for name in ("minimum_overall_delta", "minimum_delta_lower_bound",
+                     "maximum_efficiency_regression_percent"):
+            with self.subTest(name=name):
+                packet, key = gate.prepare(v3_input(), "seed")
+                key["gate"][name] = float("nan")
+                self.assert_invalid_bundle(packet, key)
+
+    def test_decide_rejects_single_heldout_comparison(self):
+        packet, key = gate.prepare(v3_input(), "seed")
+        for judge in packet["judge_packets"]:
+            for comparison in judge["comparisons"]:
+                if comparison["case_id"] == "held-negative":
+                    comparison["split"] = "development"
+        for mapping in key["mappings"]:
+            if mapping["case_id"] == "held-negative":
+                mapping["split"] = "development"
+        self.assert_invalid_bundle(packet, key)
+
+    def test_decide_rejects_different_runs_across_judge_packets(self):
+        packet, key = gate.prepare(v3_input(), "seed")
+        packet["judge_packets"][1]["comparisons"][1]["answers"][0]["outcome"] = "substituted evidence"
+        self.assert_invalid_bundle(packet, key)
+
+    def test_decide_rejects_uncounterbalanced_positions(self):
+        packet, key = gate.prepare(v3_input(), "seed")
+        for comparison in packet["judge_packets"][1]["comparisons"]:
+            comparison["answers"] = [
+                {**answer, "label": "B" if answer["label"] == "A" else "A"}
+                for answer in reversed(comparison["answers"])
+            ]
+        for mapping in key["mappings"]:
+            if mapping["judge_id"] == "judge-2":
+                mapping["treatment_label"] = "B" if mapping["treatment_label"] == "A" else "A"
+        self.assert_invalid_bundle(packet, key)
+
+    def test_decide_rejects_mismatched_calibration_material(self):
+        packet, key = gate.prepare(v3_input(), "seed")
+        packet["judge_packets"][1]["calibration_cases"][0]["answer_a"] = "wrong reference"
+        self.assert_invalid_bundle(packet, key)
+
+    def test_prepare_rejects_reused_agent_identity(self):
+        data = v3_input()
+        trial = data["cases"][0]["trials"][0]
+        trial["treatment"]["provenance"]["agent_id"] = trial["baseline"]["provenance"]["agent_id"]
+        trial["treatment"]["provenance"]["native_receipt"]["agent_id"] = trial["baseline"]["provenance"]["agent_id"]
+        with self.assertRaisesRegex(gate.Invalid, "agent_id.*unique"):
+            gate.prepare(data, "seed")
+
+    def test_prepare_rejects_development_prompt_renamed_as_heldout(self):
+        data = v3_input()
+        data["cases"][1]["input"] = data["cases"][0]["input"]
+        with self.assertRaisesRegex(gate.Invalid, "development.*heldout"):
+            gate.prepare(data, "seed")
+
+    def test_prepare_rejects_host_mismatch_despite_matching_condition_hash(self):
+        data = v3_input()
+        provenance = data["cases"][0]["trials"][0]["baseline"]["provenance"]
+        provenance["host"] = provenance["native_receipt"]["host"] = "codex"
+        with self.assertRaisesRegex(gate.Invalid, "host.*condition_manifest"):
+            gate.prepare(data, "seed")
+
+    def test_judge_cannot_reuse_a_runner_agent_in_a_new_claimed_context(self):
+        packet, key = gate.prepare(v3_input(), "seed")
+        judgment = judgment_for(packet, key)
+        provenance = judgment["judgments"][0]["provenance"]
+        provenance["agent_id"] = key["runner_provenance"][0]["baseline"]["agent_id"]
+        provenance["native_receipt"]["agent_id"] = provenance["agent_id"]
+        with self.assertRaisesRegex(gate.Invalid, "agent_id.*fresh and unique"):
+            gate.decide(packet, key, judgment)
+
+    def test_rounded_delta_does_not_clear_threshold(self):
+        data = v3_input()
+        data["gate"]["minimum_delta_lower_bound"] = 0
+        packet, key = gate.prepare(data, "seed")
+        scores = {c["comparison_id"]: {"baseline": (3, 3), "treatment": (3.2499, 3.2499)}
+                  for c in packet["judge_packets"][0]["comparisons"]}
+        self.assertEqual("retire", gate.decide(packet, key, judgment_for(packet, key, scores))["decision"])
+
+    def test_rounded_confidence_bound_does_not_clear_threshold(self):
+        data = v3_input()
+        data["gate"]["minimum_delta_lower_bound"] = 40
+        packet, key = gate.prepare(data, "seed")
+        scores = {c["comparison_id"]: {"baseline": (2, 2), "treatment": (3.9999, 3.9999)}
+                  for c in packet["judge_packets"][0]["comparisons"]}
+        self.assertEqual("retire", gate.decide(packet, key, judgment_for(packet, key, scores))["decision"])
+
+    def test_rounded_efficiency_does_not_hide_excess_cost(self):
+        data = v3_input()
+        for case in data["cases"]:
+            for trial in case["trials"]:
+                trial["treatment"]["metrics"]["elapsed_ms"] = 125.004
+        packet, key = gate.prepare(data, "seed")
+        self.assertEqual("retire", gate.decide(packet, key, judgment_for(packet, key))["decision"])
+
+    def test_efficiency_compares_only_matched_available_trials(self):
+        data = v3_input()
+        trials = [trial for case in data["cases"] if case["split"] == "heldout" for trial in case["trials"]]
+        for trial, baseline, treatment in zip(trials, (1, 1000, None), (2, None, 1)):
+            for role, value in (("baseline", baseline), ("treatment", treatment)):
+                trial[role]["metrics"]["elapsed_ms"] = value
+                if value is None:
+                    trial[role]["metrics"]["unavailable"] = {"elapsed_ms": "Host did not expose elapsed time"}
+        packet, key = gate.prepare(data, "seed")
+        result = gate.decide(packet, key, judgment_for(packet, key))
+        self.assertEqual("retire", result["decision"])
+        self.assertEqual(100, result["efficiency"]["treatment_regression_percent"]["elapsed_ms"])
+
+    def test_long_recursive_cli_command_is_rejected(self):
+        data = v3_input()
+        receipt = data["cases"][0]["trials"][0]["baseline"]["provenance"]["native_receipt"]
+        receipt["process_snapshot"] = "codex --config " + "x" * 200 + " exec prompt"
+        receipt["process_snapshot_sha256"] = gate.digest(receipt["process_snapshot"])
+        with self.assertRaisesRegex(gate.Invalid, "recursive AI CLI"):
+            gate.prepare(data, "seed")
+
+    def test_rounded_core_regression_is_not_erased_by_other_improvements(self):
+        data = v3_input()
+        data["rubric"][1]["core"] = True
+        packet, key = gate.prepare(data, "seed")
+        scores = {c["comparison_id"]: {"baseline": (3, 3), "treatment": (5, 2.9999)}
+                  for c in packet["judge_packets"][0]["comparisons"]}
+        result = gate.decide(packet, key, judgment_for(packet, key, scores))
+        self.assertEqual("retire", result["decision"])
+        self.assertIn("one or more heldout core criteria regressed", result["reasons"])
+
+    def test_decide_rejects_missing_or_non_boolean_deterministic_result(self):
+        for replacement in (None, {"passed": "false", "details": "Failure"}):
+            packet, key = gate.prepare(v3_input(), "seed")
+            for judge in packet["judge_packets"]:
+                for answer in judge["comparisons"][0]["answers"]:
+                    if replacement is None:
+                        answer.pop("grader_result")
+                    else:
+                        answer["grader_result"] = replacement
+            self.assert_invalid_bundle(packet, key)
+
+    def test_json_reader_rejects_duplicate_fields_and_nonfinite_constants(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "evidence.json"
+            for payload in ('{"decision":"retire","decision":"keep"}', '{"threshold": NaN}'):
+                path.write_text(payload, encoding="utf-8")
+                with self.assertRaises(gate.Invalid):
+                    gate.read_object(path)
+
+    def test_writer_refuses_dangling_symlink(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "new-target.json"
+            output = Path(directory) / "decision.json"
+            output.symlink_to(target)
+            with self.assertRaises(gate.Invalid):
+                gate.write_new(output, {"decision": "keep"})
+            self.assertFalse(target.exists())
+
+    def test_decide_rejects_dropped_stochastic_trial(self):
+        packet, key = gate.prepare(v3_input(), "seed")
+        removed = "held-negative::trial-2"
+        for judge in packet["judge_packets"]:
+            judge["comparisons"] = [item for item in judge["comparisons"] if item["comparison_id"] != removed]
+        for field in ("mappings", "run_metrics", "runner_provenance"):
+            key[field] = [item for item in key[field] if item["comparison_id"] != removed]
+        self.assert_invalid_bundle(packet, key)
+
+    def test_historical_packet_without_stochastic_metadata_remains_readable(self):
+        packet, key = gate.prepare(v3_input(), "seed")
+        for judge in packet["judge_packets"]:
+            for comparison in judge["comparisons"]:
+                comparison.pop("stochastic")
+        key["packet_hash"] = gate.digest(packet)
+        self.assertEqual("keep", gate.decide(packet, key, judgment_for(packet, key))["decision"])
+
+    def test_multiline_recursive_argv_remains_rejected(self):
+        data = v3_input()
+        receipt = data["cases"][0]["trials"][0]["baseline"]["provenance"]["native_receipt"]
+        receipt["process_snapshot"] = "argv=['codex',\n'--quiet',\n'exec', 'prompt']"
+        receipt["process_snapshot_sha256"] = gate.digest(receipt["process_snapshot"])
+        with self.assertRaisesRegex(gate.Invalid, "recursive AI CLI"):
+            gate.prepare(data, "seed")
 
 
 class V1CompatibilityTests(unittest.TestCase):

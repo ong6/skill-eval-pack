@@ -16,9 +16,16 @@ import sys
 
 
 SHA256_LENGTH = 64
+METRIC_FIELDS = ("elapsed_ms", "input_tokens", "output_tokens", "tool_calls", "errors")
 RECURSIVE_AI_CLI = tuple(
     re.compile(pattern, re.I | re.S)
     for pattern in (
+        r"\bcodex\b[^\r\n]*\bexec\b",
+        r"\bclaude\b[^\r\n]*(?:-p|--print)\b",
+        r"\bgemini\b[^\r\n]*(?:-p|--prompt)\b",
+        r"\baider\b[^\r\n]*--message\b",
+        # Preserve detection of the short multiline argv snapshots accepted by
+        # earlier bundles, while the line patterns handle arbitrarily long ps output.
         r"\bcodex\b.{0,80}\bexec\b",
         r"\bclaude\b.{0,80}(?:-p|--print)\b",
         r"\bgemini\b.{0,80}(?:-p|--prompt)\b",
@@ -31,9 +38,23 @@ class Invalid(ValueError):
     pass
 
 
+def unique_json_object(pairs: list[tuple[str, object]]) -> dict:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise Invalid(f"duplicate JSON field: {key}")
+        result[key] = value
+    return result
+
+
+def reject_json_constant(value: str) -> None:
+    raise Invalid(f"non-finite JSON constant: {value}")
+
+
 def read_object(path: Path) -> dict:
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        value = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique_json_object,
+                           parse_constant=reject_json_constant)
     except (OSError, json.JSONDecodeError) as exc:
         raise Invalid(f"cannot read {path}: {exc}") from exc
     if not isinstance(value, dict):
@@ -42,10 +63,12 @@ def read_object(path: Path) -> dict:
 
 
 def write_new(path: Path, value: dict) -> None:
-    if path.exists():
-        raise Invalid(f"refusing to overwrite {path}")
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    try:
+        with path.open("x", encoding="utf-8") as handle:
+            handle.write(json.dumps(value, indent=2, ensure_ascii=False) + "\n")
+    except FileExistsError as exc:
+        raise Invalid(f"refusing to overwrite {path}") from exc
 
 
 def canonical(value: object) -> bytes:
@@ -160,6 +183,8 @@ def validate_native_provenance(value: object, field: str, *, require_receipt: bo
         coordinator_id = require_text(
             receipt.get("coordinator_id"), f"{field}.native_receipt.coordinator_id"
         )
+        if value["agent_id"] == coordinator_id:
+            raise Invalid(f"{field} evaluator agent_id must differ from coordinator_id")
         if receipt.get("parent_agent_id") != coordinator_id:
             raise Invalid(
                 f"{field}.native_receipt.parent_agent_id must equal coordinator_id; "
@@ -200,7 +225,7 @@ def validate_metrics(value: object, field: str) -> None:
     unavailable = value.get("unavailable", {})
     if not isinstance(unavailable, dict):
         raise Invalid(f"{field}.unavailable must be an object")
-    for name in ("elapsed_ms", "input_tokens", "output_tokens", "tool_calls", "errors"):
+    for name in METRIC_FIELDS:
         item = value.get(name)
         if item is None:
             require_text(unavailable.get(name), f"{field}.unavailable.{name}")
@@ -266,6 +291,8 @@ def validate_input_v2(data: dict) -> None:
     splits = set()
     comparison_ids = set()
     context_ids = set()
+    agent_ids = set()
+    prompts = {"development": set(), "heldout": set()}
     for case in cases:
         if not isinstance(case, dict):
             raise Invalid("each case must be an object")
@@ -279,6 +306,7 @@ def validate_input_v2(data: dict) -> None:
         splits.add(split)
         for field in ("input", "expected"):
             require_text(case.get(field), f"case {case_id} {field}")
+        prompts[split].add(case["input"].strip())
         if "deterministic_grader" in case:
             require_text(case["deterministic_grader"], f"case {case_id} deterministic_grader")
         stochastic = case.get("stochastic", False)
@@ -308,12 +336,18 @@ def validate_input_v2(data: dict) -> None:
                 if context_id in context_ids:
                     raise Invalid(f"runner context_id must be unique: {context_id}")
                 context_ids.add(context_id)
+                agent_id = trial[role]["provenance"]["agent_id"]
+                if agent_id in agent_ids:
+                    raise Invalid(f"runner agent_id must be unique: {agent_id}")
+                agent_ids.add(agent_id)
             if "deterministic_grader" in case:
                 for role in ("baseline", "treatment"):
                     require_text(
                         trial[role].get("grader_result", {}).get("details"),
                         f"case {case_id} trial {trial_id} {role}.grader_result.details",
                     )
+    if prompts["development"] & prompts["heldout"]:
+        raise Invalid("development prompts cannot be reused as heldout cases")
     if splits != {"development", "heldout"}:
         raise Invalid("v2 requires both development and heldout cases")
     validate_trigger_tests(data)
@@ -419,6 +453,8 @@ def validate_input_v3(data: dict) -> None:
                     role=role, condition_hash=condition_hash, baseline_hash=baseline_hash,
                     treatment_hash=treatment_hash,
                 )
+                if trial[role]["provenance"].get("host") != data["condition_manifest"]["host"]:
+                    raise Invalid("runner host does not match condition_manifest.host")
     coordinator_ids = {
         trial[role]["provenance"]["native_receipt"]["coordinator_id"]
         for case in data["cases"] for trial in case["trials"]
@@ -506,6 +542,7 @@ def prepare_v2(data: dict, seed: str) -> tuple[dict, dict]:
                 "case_id": case["id"],
                 "trial_id": trial["id"],
                 "split": case["split"],
+                "stochastic": case.get("stochastic", False),
                 "input": case["input"],
                 "expected": case["expected"],
                 "answers": [{"label": label, **blinded_runs[label]} for label in ("A", "B")],
@@ -635,6 +672,133 @@ def validate_judgment_v1(packet: dict, judgment: dict) -> None:
         validate_scored_comparison(pair, rubric, f"case {pair['case_id']}")
 
 
+def index_records(value: object, id_field: str, field: str) -> dict:
+    if not isinstance(value, list):
+        raise Invalid(f"{field} must be an array")
+    indexed = {}
+    for item in value:
+        if not isinstance(item, dict):
+            raise Invalid(f"each {field} record must be an object")
+        item_id = require_text(item.get(id_field), f"{field}.{id_field}")
+        if item_id in indexed:
+            raise Invalid(f"{field} must contain every {id_field} exactly once")
+        indexed[item_id] = item
+    return indexed
+
+
+def validate_retained_bundle(packet: dict, key: dict) -> None:
+    """Revalidate retained evidence; the packet hash alone does not validate the key."""
+    judges = index_records(packet.get("judge_packets"), "judge_id", "judge_packets")
+    if len(judges) < 2:
+        raise Invalid("packet must contain at least two judge packets")
+    first = next(iter(judges.values()))
+    comparisons = index_records(first.get("comparisons"), "comparison_id", "comparisons")
+    provenance = index_records(key.get("runner_provenance"), "comparison_id", "runner_provenance")
+    if set(provenance) != set(comparisons):
+        raise Invalid("runner_provenance must cover every comparison exactly once")
+    metrics = {}
+    if packet["version"] >= 3:
+        metrics = index_records(key.get("run_metrics"), "comparison_id", "run_metrics")
+        if set(metrics) != set(comparisons):
+            raise Invalid("run_metrics must cover every comparison exactly once")
+    mappings = key.get("mappings")
+    if not isinstance(mappings, list):
+        raise Invalid("key mappings must be an array")
+    by_judge = {judge_id: {} for judge_id in judges}
+    for mapping in mappings:
+        if not isinstance(mapping, dict):
+            raise Invalid("each key mapping must be an object")
+        judge_id = require_text(mapping.get("judge_id"), "mapping.judge_id")
+        comparison_id = require_text(mapping.get("comparison_id"), "mapping.comparison_id")
+        if (judge_id not in judges or comparison_id not in comparisons
+                or comparison_id in by_judge[judge_id]
+                or mapping.get("treatment_label") not in ("A", "B")):
+            raise Invalid("key has duplicate or malformed mappings")
+        by_judge[judge_id][comparison_id] = mapping
+    canonical_runs = {}
+    cases = {}
+    positions = defaultdict(list)
+    for judge_id, judge in judges.items():
+        if judge.get("version") != packet["version"]:
+            raise Invalid("judge packet version does not match bundle")
+        for field in ("rubric", "critical_failures", "calibration_cases"):
+            if judge.get(field) != first.get(field):
+                raise Invalid(f"judge packets disagree on {field}")
+        judge_comparisons = index_records(judge.get("comparisons"), "comparison_id", "comparisons")
+        if set(judge_comparisons) != set(comparisons) or set(by_judge[judge_id]) != set(comparisons):
+            raise Invalid("every judge must receive every comparison exactly once")
+        for comparison_id, comparison in judge_comparisons.items():
+            mapping = by_judge[judge_id][comparison_id]
+            if any(mapping.get(field) != comparison.get(field) for field in ("case_id", "trial_id", "split")):
+                raise Invalid("key mapping metadata does not match packet")
+            answers = index_records(comparison.get("answers"), "label", "answers")
+            if set(answers) != {"A", "B"}:
+                raise Invalid("comparison answers must contain A and B exactly once")
+            treatment_label = mapping["treatment_label"]
+            positions[comparison_id].append(treatment_label)
+            runs = {}
+            for role in ("baseline", "treatment"):
+                label = treatment_label if role == "treatment" else ("B" if treatment_label == "A" else "A")
+                runs[role] = {field: value for field, value in answers[label].items() if field != "label"}
+            metadata = {field: comparison.get(field) for field in
+                        ("case_id", "trial_id", "split", "input", "expected", "deterministic_grader", "stochastic")}
+            retained = {"metadata": metadata, "runs": runs}
+            if comparison_id in canonical_runs:
+                if canonical_runs[comparison_id] != retained:
+                    raise Invalid("judge packets must contain identical runs and metadata after unblinding")
+                continue
+            canonical_runs[comparison_id] = retained
+            case_id = require_text(comparison.get("case_id"), "comparison.case_id")
+            trial_id = require_text(comparison.get("trial_id"), "comparison.trial_id")
+            if comparison_id != f"{case_id}::{trial_id}":
+                raise Invalid("comparison_id does not match case_id and trial_id")
+            # Historical v2/v3 packets omitted stochastic; preserve their
+            # readability without claiming to recover that missing declaration.
+            case_metadata = {field: comparison[field] for field in
+                             ("split", "input", "expected", "deterministic_grader", "stochastic") if field in comparison}
+            if case_id not in cases:
+                cases[case_id] = {"id": case_id, **case_metadata, "trials": []}
+            elif {field: value for field, value in cases[case_id].items()
+                  if field not in ("id", "trials")} != case_metadata:
+                raise Invalid("trials disagree on case metadata")
+            trial = {"id": trial_id}
+            for role in runs:
+                trial[role] = {**runs[role], "provenance": provenance[comparison_id].get(role)}
+                if metrics:
+                    trial[role]["metrics"] = metrics[comparison_id].get(role)
+            cases[case_id]["trials"].append(trial)
+    if any(abs(labels.count("A") - labels.count("B")) > 1 for labels in positions.values()):
+        raise Invalid("treatment positions must be counterbalanced for every comparison")
+    if key.get("rubric") != first.get("rubric"):
+        raise Invalid("key rubric does not match judge packets")
+    data = {
+        "version": packet["version"], "title": packet.get("title"),
+        "judge_count": len(judges), "rubric": key.get("rubric"),
+        "critical_failures": first.get("critical_failures", []), "gate": key.get("gate", {}),
+        "execution_policy": key.get("execution_policy"), "cases": list(cases.values()),
+        "trigger_tests": key.get("trigger_tests", []),
+    }
+    if packet["version"] >= 3:
+        calibration = key.get("judge_calibration")
+        if not isinstance(calibration, dict):
+            raise Invalid("key judge_calibration must be an object")
+        public_cases = index_records(first.get("calibration_cases"), "id", "calibration_cases")
+        secret_cases = index_records(calibration.get("answers"), "id", "calibration answers")
+        if set(public_cases) != set(secret_cases):
+            raise Invalid("calibration answers must cover every reference exactly once")
+        data.update(
+            condition_manifest=key.get("condition_manifest"), client_coverage=key.get("client_coverage"),
+            judge_calibration={
+                **calibration,
+                "cases": [{**case, "correct_winner": secret_cases[case_id].get("correct_winner")}
+                          for case_id, case in public_cases.items()],
+            },
+        )
+        if any("correct_winner" in case for case in public_cases.values()):
+            raise Invalid("calibration packet must not expose correct_winner")
+    validate_input(data)
+
+
 def validate_judgment_v2(packet: dict, key: dict, judgment: dict) -> None:
     version = packet.get("version")
     if version not in (2, 3) or judgment.get("version") != version or not isinstance(judgment.get("judgments"), list):
@@ -695,6 +859,8 @@ def validate_judgment_v2(packet: dict, key: dict, judgment: dict) -> None:
             if context_id in runner_context_ids:
                 raise Invalid(f"runner context_id must be unique: {context_id}")
             runner_context_ids.add(context_id)
+    used_agent_ids = {item[role]["agent_id"] for item in runner_provenance
+                      for role in ("baseline", "treatment")}
     judge_context_ids = set()
     for judge in actual:
         provenance = validate_native_provenance(
@@ -705,7 +871,12 @@ def validate_judgment_v2(packet: dict, key: dict, judgment: dict) -> None:
         if context_id in runner_context_ids or context_id in judge_context_ids:
             raise Invalid(f"judge context_id must be fresh and unique: {context_id}")
         judge_context_ids.add(context_id)
+        if provenance["agent_id"] in used_agent_ids:
+            raise Invalid(f"judge agent_id must be fresh and unique: {provenance['agent_id']}")
+        used_agent_ids.add(provenance["agent_id"])
         if version >= 3:
+            if provenance.get("host") != key["condition_manifest"]["host"]:
+                raise Invalid("judge host does not match condition_manifest.host")
             if provenance["native_receipt"]["coordinator_id"] != next(iter({
                 item[role]["native_receipt"]["coordinator_id"]
                 for item in runner_provenance for role in ("baseline", "treatment")
@@ -830,7 +1001,7 @@ def summary(values: list[float]) -> dict:
     }
 
 
-def paired_delta_summary(baseline: list[float], treatment: list[float]) -> dict:
+def paired_delta_summary(baseline: list[float], treatment: list[float], *, rounded: bool = True) -> dict:
     if len(baseline) != len(treatment) or not baseline:
         raise Invalid("paired score series must be non-empty and equal length")
     values = [right - left for left, right in zip(baseline, treatment)]
@@ -839,22 +1010,22 @@ def paired_delta_summary(baseline: list[float], treatment: list[float]) -> dict:
         margin = 0.0
     else:
         margin = 1.96 * statistics.stdev(values) / math.sqrt(len(values))
-    return {
-        "count": len(values), "mean": round(mean, 2),
-        "lower_95": round(mean - margin, 2), "upper_95": round(mean + margin, 2),
-    }
+    values = {"count": len(values), "mean": mean, "lower_95": mean - margin, "upper_95": mean + margin}
+    return {field: round(value, 2) if rounded else value for field, value in values.items()}
 
 
-def efficiency_summary(metrics: list[dict]) -> dict:
+def efficiency_summary(metrics: list[dict], *, rounded: bool = True) -> dict:
     by_role = {"baseline": defaultdict(list), "treatment": defaultdict(list)}
     for item in metrics:
-        for role in by_role:
-            for field, value in item[role].items():
-                if field == "unavailable" or value is None:
-                    continue
-                by_role[role][field].append(float(value))
+        for field in METRIC_FIELDS:
+            # Compare the same trials on both sides. Independent filtering can
+            # make a regression look cheaper by averaging unrelated populations.
+            if any(item[role].get(field) is None for role in by_role):
+                continue
+            for role in by_role:
+                by_role[role][field].append(float(item[role][field]))
     means = {
-        role: {field: round(statistics.mean(values), 2) for field, values in fields.items()}
+        role: {field: statistics.mean(values) for field, values in fields.items()}
         for role, fields in by_role.items()
     }
     regression = {}
@@ -865,7 +1036,12 @@ def efficiency_summary(metrics: list[dict]) -> dict:
         if baseline == 0:
             regression[field] = 0.0 if treatment == 0 else None
         else:
-            regression[field] = round((treatment - baseline) / baseline * 100, 2)
+            regression[field] = (treatment - baseline) / baseline * 100
+    if rounded:
+        means = {role: {field: round(value, 2) for field, value in fields.items()}
+                 for role, fields in means.items()}
+        regression = {field: round(value, 2) if value is not None else None
+                      for field, value in regression.items()}
     return {"means": means, "treatment_regression_percent": regression}
 
 
@@ -918,6 +1094,7 @@ def agreement_report(winners: dict[tuple[str, str], str], judge_ids: list[str], 
 
 
 def decide_v2(packet: dict, key: dict, judgment: dict) -> dict:
+    validate_retained_bundle(packet, key)
     validate_judgment_v2(packet, key, judgment)
     mappings = key.get("mappings")
     if not isinstance(mappings, list):
@@ -1009,7 +1186,7 @@ def decide_v2(packet: dict, key: dict, judgment: dict) -> dict:
     case_results = {"development": [], "heldout": []}
     case_wins = {split: {"baseline": 0, "treatment": 0, "tie": 0} for split in case_results}
     for (split, case_id), role_values in sorted(case_scores.items()):
-        means = {role: round(statistics.mean(values), 2) for role, values in role_values.items()}
+        means = {role: statistics.mean(values) for role, values in role_values.items()}
         if means["treatment"] > means["baseline"]:
             winner = "treatment"
         elif means["baseline"] > means["treatment"]:
@@ -1017,14 +1194,16 @@ def decide_v2(packet: dict, key: dict, judgment: dict) -> dict:
         else:
             winner = "tie"
         case_wins[split][winner] += 1
-        case_results[split].append({"case_id": case_id, "winner": winner, "scores": means})
+        case_results[split].append({"case_id": case_id, "winner": winner,
+                                    "scores": {role: round(value, 2) for role, value in means.items()}})
 
     unioned_failures = {
         split: {role: union_failures(entries) for role, entries in roles.items()}
         for split, roles in failures.items()
     }
     heldout_means = {role: score_summary["heldout"][role]["mean"] for role in ("baseline", "treatment")}
-    delta = round(heldout_means["treatment"] - heldout_means["baseline"], 2)
+    raw_delta = statistics.mean(totals["heldout"]["treatment"]) - statistics.mean(totals["heldout"]["baseline"])
+    delta = round(raw_delta, 2)
     heldout_comparison_means = {
         role: [
             statistics.mean(values[role])
@@ -1033,16 +1212,17 @@ def decide_v2(packet: dict, key: dict, judgment: dict) -> dict:
         for role in ("baseline", "treatment")
     }
     paired_delta = paired_delta_summary(
-        heldout_comparison_means["baseline"], heldout_comparison_means["treatment"]
+        heldout_comparison_means["baseline"], heldout_comparison_means["treatment"], rounded=False
     )
     minimum = key.get("gate", {}).get("minimum_overall_delta", 5)
     core_deltas = [
-        criterion_scores["heldout"]["treatment"][r["id"]] - criterion_scores["heldout"]["baseline"][r["id"]]
+        statistics.mean(criterion_totals["heldout"]["treatment"][r["id"]])
+        - statistics.mean(criterion_totals["heldout"]["baseline"][r["id"]])
         for r in rubric if r["core"]
     ]
     reasons = []
-    if delta < minimum:
-        reasons.append(f"heldout overall delta {delta} is below required {minimum}")
+    if raw_delta < minimum:
+        reasons.append(f"heldout overall delta {raw_delta} is below required {minimum}")
     if any(value < 0 for value in core_deltas):
         reasons.append("one or more heldout core criteria regressed")
     if not any(value > 0 for value in core_deltas):
@@ -1076,7 +1256,7 @@ def decide_v2(packet: dict, key: dict, judgment: dict) -> dict:
         for item in metrics_by_comparison.values():
             validate_metrics(item.get("baseline"), "run_metrics.baseline")
             validate_metrics(item.get("treatment"), "run_metrics.treatment")
-        efficiency = efficiency_summary(list(metrics_by_comparison.values()))
+        efficiency = efficiency_summary(list(metrics_by_comparison.values()), rounded=False)
         maximum_regression = key.get("gate", {}).get("maximum_efficiency_regression_percent", 50)
         for field, regression in efficiency["treatment_regression_percent"].items():
             if regression is None or regression > maximum_regression:
@@ -1095,8 +1275,8 @@ def decide_v2(packet: dict, key: dict, judgment: dict) -> dict:
             "results": trigger_results, "heldout_failures": heldout_trigger_failures,
         },
         "judge_agreement": agreement_report(winners, judge_ids, heldout_ids),
-        "paired_delta": paired_delta,
-        "efficiency": efficiency,
+        "paired_delta": {field: round(value, 2) for field, value in paired_delta.items()},
+        "efficiency": efficiency_summary(list(metrics_by_comparison.values())) if efficiency is not None else None,
         "execution_provenance": {
             "policy": key["execution_policy"],
             "runners": key["runner_provenance"],

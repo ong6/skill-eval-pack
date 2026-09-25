@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 import re
@@ -18,9 +19,23 @@ class Invalid(ValueError):
     pass
 
 
+def unique_json_object(pairs: list[tuple[str, object]]) -> dict:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise Invalid(f"duplicate JSON field: {key}")
+        result[key] = value
+    return result
+
+
+def reject_json_constant(value: str) -> None:
+    raise Invalid(f"non-finite JSON constant: {value}")
+
+
 def read_object(path: Path) -> dict:
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        value = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique_json_object,
+                           parse_constant=reject_json_constant)
     except (OSError, json.JSONDecodeError) as exc:
         raise Invalid(f"cannot read {path}: {exc}") from exc
     if not isinstance(value, dict):
@@ -62,12 +77,67 @@ def artifact(root: Path, relative: object, expected_hash: object, field: str, ma
         local = root / manifest_parent / candidate
         if local.is_file():
             path = local
+    if not path.resolve().is_relative_to(root.resolve()):
+        raise Invalid(f"{field} must remain inside the evidence root")
     if not path.is_file():
         raise Invalid(f"{field} does not exist: {text}")
     actual_hash = file_digest(path)
     if actual_hash != require_sha(expected_hash, field + "_sha256"):
         raise Invalid(f"{field} hash does not match retained artifact")
     return read_object(path)
+
+
+def retained_inputs(packet: dict, field: str) -> tuple[set[str], set[str]]:
+    judges = packet.get("judge_packets")
+    if packet.get("version") != 3 or not isinstance(judges, list) or not judges:
+        raise Invalid(f"{field} requires retained v3 judge packets to identify exposed cases")
+    seen, heldout = set(), set()
+    for judge in judges:
+        comparisons = judge.get("comparisons") if isinstance(judge, dict) else None
+        if not isinstance(comparisons, list) or not comparisons:
+            raise Invalid(f"{field} comparisons are required to identify exposed cases")
+        for item in comparisons:
+            if not isinstance(item, dict) or item.get("split") not in ("development", "heldout"):
+                raise Invalid(f"{field} exposed comparison must declare its split")
+            prompt = require_text(item.get("input"), field + " exposed input").strip()
+            seen.add(prompt)
+            if item["split"] == "heldout":
+                heldout.add(prompt)
+    return seen, heldout
+
+
+def replay_decision(attempt: dict, decision: dict, manifest: dict, root: Path,
+                    manifest_parent: Path, field: str) -> tuple[set[str], set[str]]:
+    """Recompute current decisions and return seen and heldout input fingerprints."""
+    if type(decision.get("version")) is not int or decision["version"] != 3:
+        raise Invalid(f"{field} activation requires a current v3 decision with replayable evidence")
+    evidence = {
+        name: artifact(root, attempt.get(name + "_artifact"), attempt.get(name + "_sha256"),
+                       field + " " + name + "_artifact", manifest_parent)
+        for name in ("packet", "key", "judgment")
+    }
+    condition = evidence["key"].get("condition_manifest")
+    if not isinstance(condition, dict) or condition.get("treatment_skill_sha256") != attempt["candidate_sha256"]:
+        raise Invalid(f"{field} candidate_sha256 does not match frozen treatment evidence")
+    baseline = condition.get("baseline_skill")
+    expected_baseline = "absent" if manifest["candidate_kind"] == "new" else {
+        "mode": "prior_version", "version": manifest["last_proven_version"],
+        "sha256": manifest["last_proven_sha256"],
+    }
+    if baseline != expected_baseline:
+        raise Invalid(f"{field} baseline_skill does not match candidate_kind and last_proven evidence")
+    if any(type(value.get("version")) is not int or value["version"] != 3 for value in evidence.values()):
+        raise Invalid(f"{field} activation requires v3 packet, key, and judgment evidence")
+    spec = importlib.util.spec_from_file_location("skillsmith_eval_gate", Path(__file__).with_name("eval_gate.py"))
+    evaluator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(evaluator)
+    try:
+        replayed = evaluator.decide(evidence["packet"], evidence["key"], evidence["judgment"])
+    except (ValueError, KeyError, TypeError) as exc:
+        raise Invalid(f"{field} retained evaluation is invalid: {exc}") from exc
+    if decision != replayed:
+        raise Invalid(f"{field} decision does not match a replayed v3 decision")
+    return retained_inputs(evidence["packet"], field)
 
 
 def validate(manifest: dict, root: Path, manifest_parent: Path = Path('.')) -> dict:
@@ -92,9 +162,12 @@ def validate(manifest: dict, root: Path, manifest_parent: Path = Path('.')) -> d
     heldout_sets = set()
     candidate_hashes = set()
     decisions = []
+    exposed_inputs = set()
+    unknown_exposure = False
     for index, attempt in enumerate(attempts, 1):
         field = f"attempt {index}"
-        if not isinstance(attempt, dict) or attempt.get("revision") != index:
+        if (not isinstance(attempt, dict) or type(attempt.get("revision")) is not int
+                or attempt["revision"] != index):
             raise Invalid(f"{field} revision must be sequential starting at 1")
         candidate_hash = require_sha(attempt.get("candidate_sha256"), field + " candidate_sha256")
         if candidate_hash in candidate_hashes:
@@ -110,10 +183,19 @@ def validate(manifest: dict, root: Path, manifest_parent: Path = Path('.')) -> d
         if heldout_set in heldout_sets:
             raise Invalid(f"{field} reuses an exposed heldout_set")
         heldout_sets.add(heldout_set)
+        if "invalid_evaluation" in attempt and not isinstance(attempt["invalid_evaluation"], bool):
+            raise Invalid(f"{field} invalid_evaluation must be boolean")
         if attempt.get("invalid_evaluation") is True:
             require_text(attempt.get("invalid_reason"), field + " invalid_reason")
             if attempt.get("heldout_retired") is not True:
                 raise Invalid(f"{field} invalid heldout_set must be retired")
+            if "packet_artifact" in attempt:
+                packet = artifact(root, attempt["packet_artifact"], attempt.get("packet_sha256"),
+                                  field + " packet_artifact", manifest_parent)
+                seen_inputs, _ = retained_inputs(packet, field)
+                exposed_inputs.update(seen_inputs)
+            else:
+                unknown_exposure = True
             decisions.append("invalid")
             continue
         decision = artifact(
@@ -122,6 +204,30 @@ def validate(manifest: dict, root: Path, manifest_parent: Path = Path('.')) -> d
         )
         if decision.get("decision") not in ("keep", "retire"):
             raise Invalid(f"{field} decision artifact must contain keep or retire")
+        reasons = decision.get("reasons", [])
+        if not isinstance(reasons, list) or any(not isinstance(reason, str) or not reason.strip() for reason in reasons):
+            raise Invalid(f"{field} decision reasons must be a string array")
+        if decision["decision"] == "keep" and reasons:
+            raise Invalid(f"{field} keep decision cannot contain failure reasons")
+        if decision.get("version") == 3:
+            execution = decision.get("execution_provenance")
+            runners = execution.get("runners") if isinstance(execution, dict) else None
+            if not isinstance(runners, list) or not runners:
+                raise Invalid(f"{field} v3 decision must retain runner provenance")
+            for runner in runners:
+                treatment = runner.get("treatment") if isinstance(runner, dict) else None
+                if not isinstance(treatment, dict) or treatment.get("skill_sha256") != candidate_hash:
+                    raise Invalid(f"{field} candidate_sha256 does not match v3 decision treatment evidence")
+        has_replay = any(name + "_artifact" in attempt for name in ("packet", "key", "judgment"))
+        if decision["decision"] == "keep" and unknown_exposure:
+            raise Invalid(f"{field} activation cannot establish fresh heldouts after prior attempts with unavailable exposure evidence")
+        if decision["decision"] == "keep" or decision.get("version") == 3 or has_replay:
+            seen_inputs, heldout_inputs = replay_decision(attempt, decision, manifest, root, manifest_parent, field)
+            if exposed_inputs & heldout_inputs:
+                raise Invalid(f"{field} heldout inputs reuse exposed cases from an earlier attempt")
+            exposed_inputs.update(seen_inputs)
+        else:
+            unknown_exposure = True
         decisions.append(decision["decision"])
         if decision["decision"] == "keep" and index != len(attempts):
             raise Invalid(f"{field} passed but later attempts exist")

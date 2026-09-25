@@ -374,6 +374,12 @@ The helper decides one candidate attempt. The orchestrator must retain a manifes
           "heldout_set": "heldout-set-1",
           "decision_artifact": "r1/decision.json",
           "decision_sha256": "64 lowercase hex characters",
+          "packet_artifact": "r1/judge-packets.json",
+          "packet_sha256": "64 lowercase hex characters",
+          "key_artifact": "r1/judge-key.json",
+          "key_sha256": "64 lowercase hex characters",
+          "judgment_artifact": "r1/judge-outputs.json",
+          "judgment_sha256": "64 lowercase hex characters",
           "heldout_retired": true
         }
       ],
@@ -409,3 +415,25 @@ restore_last_proven. Failed attempts must retire their exposed heldout set. Atte
 candidate hashes must be unique, and every decision path and hash must resolve to retained evidence.
 The normal maximum is three; a positive user-specified bound is also valid, and only the user may
 reset or extend it. Invalid evidence never refunds a materially distinct candidate-version slot.
+
+Activation requires a current version 3 decision and all three retained replay artifacts shown
+above. Each path is relative to the evidence root (or, for a basename, the manifest directory), and
+each hash covers the file bytes. Symlinks must stay inside the evidence root. The lifecycle helper
+recomputes the decision from the packet, key, and judgments and requires the entire retained decision
+to match. A minimal `{"decision":"keep"}` file, an edited report, or a legacy v1/v2 keep cannot
+activate a candidate. Candidate hashes must match the frozen treatment and its runner evidence. For
+an existing revision, the frozen prior-version baseline must also match `last_proven_version` and
+`last_proven_sha256`; a new candidate uses the absent-skill baseline.
+
+Failed v3 attempts also require replay artifacts. The helper replays each decision and rejects a
+later heldout whose input repeats an earlier exposed input, even under a different case or
+heldout-set name. An invalidated attempt still exposes the prompts in its retained, hashed packet;
+invalidating a judgment does not make those cases unseen. Legacy retire records and invalid attempts
+without packets remain readable for historical accounting, but block later activation because their
+exposed inputs cannot be checked. Retain those packets before continuing the bounded evaluation.
+Receipt hashes establish retained-data consistency; the coordinator remains responsible for obtaining
+authentic host events and snapshots.
+
+Newly prepared packets retain each case's `stochastic` declaration so deciding a bundle can reject
+a dropped trial. Historical packets that omitted this declaration remain readable; the helper
+cannot recover a missing original declaration from those artifacts.
