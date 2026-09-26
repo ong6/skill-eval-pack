@@ -1,4 +1,4 @@
-# skillsmith
+# Skillsmith — Skill Builder and Evaluator
 
 [![CI](https://github.com/ong6/skillsmith/actions/workflows/ci.yml/badge.svg)](https://github.com/ong6/skillsmith/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -27,13 +27,28 @@ resulting agent runs. The write-up is at [junxiong.dev/skillsmith](https://junxi
     git clone https://github.com/ong6/skillsmith.git
     bash skillsmith/install.sh /absolute/path/to/repository
 
-The installer copies one canonical skill to .claude/skills/skillsmith and exposes the same files to
-Codex at .agents/skills/skillsmith. If the target repo has .agents/sync-skills.sh, that existing
+The installer copies one canonical skill to .claude/skills/build-skill and exposes the same files to
+Codex at .agents/skills/build-skill. If the target repo has .agents/sync-skills.sh, that existing
 validator owns the Codex link. Existing installs are never overwritten unless --force is explicit.
 
-Then ask the agent to add or revise a skill; the description routes those requests to skillsmith.
+The invokable skill is **`build-skill`**: an action-object name for making and proving a skill.
+Then ask the agent to add or revise a skill; the description routes those requests to build-skill.
 Evaluation is deliberate, not a lifecycle hook: launching model runs during PostToolUse or Stop
 would be expensive, context-poor, and hard to isolate.
+
+### Migrating the old skill identifier
+
+The repository remains `ong6/skillsmith`; the exposed skill was renamed from `skillsmith` to
+`build-skill`. The installer refuses an old active installation, even with `--force`, to preserve
+personalized rules and avoid loading two competing copies.
+
+For an unmodified install, move `.claude/skills/skillsmith` to a dated folder under
+`archive/skills/` in the host repo, remove its `.agents/skills/skillsmith` symlink, and run the
+installer again. For a customized install, migrate that directory to `.claude/skills/build-skill`,
+change its frontmatter name and self-invocations, update `agents/openai.yaml`, repair references,
+and recreate the canonical `.agents/skills/build-skill` link. Keep custom rules; compare changes
+against this source before using `--force`. Historical evaluation artifacts retain their original
+names and hashes. No evaluator behavior changed in this naming migration.
 
 ## Helpers
 

@@ -1,5 +1,6 @@
 import importlib.util
 from pathlib import Path
+import shutil
 import sys
 import tempfile
 import unittest
@@ -41,8 +42,13 @@ class FrontmatterTests(unittest.TestCase):
 class LintTests(unittest.TestCase):
     def test_this_skill_passes_its_own_lint(self):
         with tempfile.TemporaryDirectory() as directory:
-            installed = Path(directory) / "skillsmith"
-            installed.symlink_to(ROOT)
+            installed = Path(directory) / "build-skill"
+            # A repository checkout may have any name; validate the actual
+            # installed payload shape instead of resolving back to its checkout.
+            for relative in load("check_payload").PAYLOAD:
+                target = installed / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(ROOT / relative, target)
             errors, warnings = lint.lint(installed)
         self.assertEqual([], errors)
         self.assertEqual([], warnings)

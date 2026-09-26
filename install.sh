@@ -17,9 +17,19 @@ case "$1" in /*) ;; *) printf 'repository path must be absolute\n' >&2; exit 2 ;
 
 repo=${1%/}
 source_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-target="$repo/.claude/skills/skillsmith"
-codex_link="$repo/.agents/skills/skillsmith"
+target="$repo/.claude/skills/build-skill"
+codex_link="$repo/.agents/skills/build-skill"
 [ -d "$repo" ] || { printf 'repository does not exist: %s\n' "$repo" >&2; exit 2; }
+
+# An old personalized skill must be reviewed, not silently shadowed by a second
+# active installation under the new identifier.
+for legacy in "$repo/.claude/skills/skillsmith" "$repo/.agents/skills/skillsmith"; do
+  if [ -e "$legacy" ] || [ -L "$legacy" ]; then
+    printf 'legacy skillsmith installation found: %s\n' "$legacy" >&2
+    printf 'Preserve it outside active skill discovery and reconcile its customizations before installing build-skill. See README.md migration instructions. No installation files changed.\n' >&2
+    exit 2
+  fi
+done
 
 # Check both destinations and the complete source before touching an installation.
 if [ -e "$target" ] || [ -L "$target" ]; then
@@ -104,7 +114,7 @@ link_managed=1
 if [ -x "$repo/.agents/sync-skills.sh" ]; then
   (cd "$repo" && bash .agents/sync-skills.sh)
 else
-  ln -s ../../.claude/skills/skillsmith "$codex_link"
+  ln -s ../../.claude/skills/build-skill "$codex_link"
 fi
 # A successful validator must actually expose the canonical payload.
 python3 - "$target" "$codex_link" <<'PY'

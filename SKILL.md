@@ -1,5 +1,5 @@
 ---
-name: skillsmith
+name: build-skill
 description: >-
   Make an agent skill grounded in the current repository, then prove it beats the
   same model without it: gate whether a skill is the right mechanism, inventory
@@ -9,7 +9,7 @@ description: >-
   edits, AGENTS.md rules, hooks, or prompts that do not change a skill.
 ---
 
-# Skillsmith
+# Build Skill
 
 No skill earns permanent prompt space without beating the same model on the same task without it.
 Make the skill from what the repository actually needs, then prove it before declaring it installed.
@@ -182,7 +182,7 @@ transcripts, and outputs; keep them out of public repositories unless reviewed.
 
 Before installing or declaring parity, verify the installed payload against the public checkout:
 
-    python3 scripts/check_payload.py --installed /absolute/repo/.claude/skills/skillsmith
+    python3 scripts/check_payload.py --installed /absolute/repo/.claude/skills/build-skill
 
 ## Failure patterns
 

@@ -1,7 +1,7 @@
 interface:
-  display_name: "Skillsmith"
+  display_name: "Build Skill"
   short_description: "Make a skill from your repo, then prove it beats no skill"
-  default_prompt: "Use $skillsmith to make this skill from what the repo needs, then keep it only if it beats a no-skill baseline in a blinded evaluation."
+  default_prompt: "Use $build-skill to make this skill from what the repo needs, then keep it only if it beats a no-skill baseline in a blinded evaluation."
 
 policy:
   allow_implicit_invocation: true
